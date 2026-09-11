@@ -15,6 +15,10 @@ No cloud, no API key. Everything runs on your machine.
 
 - **Free text → one variant** — the original mode, described by an English/German
   prompt.
+- **2D drawing (SVG) → 3D** — give the workbench a 2D front-elevation SVG whose
+  `<desc>` element carries a machine-readable spec (units, coordinate mapping,
+  element list with coordinates); the LLM decomposes the drawing into structural
+  elements and builds the 3D model (reference: `Resources/drawings/bridge.svg`).
 - **Variant tables** — build *many* variants from a single base geometry via one of:
   - a **CSV** file (row 1 = headers),
   - an **XLSX** file (row 1 = headers, optional sheet name),
@@ -32,11 +36,20 @@ No cloud, no API key. Everything runs on your machine.
 - **Material density** — preset densities (Stahl, Aluminium, Kupfer, Kunststoff,
   Holz, Titan) or a custom value; this drives the mass target.
 - **CSV export** — variant results + measured values + failures to a CSV file.
+- **Skills (deterministic generators)** — parameterized Python build-functions lived
+  under `Skills/<name>/<name>.py`; no LLM needed, exact reproducibility, with
+  built-in check rules (kollision, Konnektivität). Reference skill:
+  `Skills/bruecke/bruecke.py` (parametrisierte Fachwerkbrücke, 13 Solids).
+- **Skill-Designer** — create new skills dialogisch (Name, Beschreibung,
+  Parameter-Tabellenzeilen, `build(params)`) code, speichern unter …).
+- **Configurable backend** — pi-CLI (Standard), OpenAI-kompatibler HTTP-Endpunkt
+  oder Ollama-nativ; Base-URL, Modell und API-Key im Dialog einstellbar, inkl.
+  „Verbindung testen“-Button.
 
 ## How it works
 
 ```
-You type a prompt / load a variant table
+You type a prompt / load a 2D drawing (SVG) / load a variant table
     │
     ▼
 pi (CLI harness) ──► Ollama  (model: qwen-gross:latest)
@@ -89,6 +102,8 @@ pi --list-models ollama           # should list the model
 Copy the directory into FreeCAD's Mod folder and restart FreeCAD:
 
 ```sh
+./start.sh sync      # kopiert alle Dateien inkl. Skills/ in den FreeCAD-Mod-Pfad
+# oder manuell:
 cp -r TextToGeometry ~/.local/share/FreeCAD/Mod/
 # on some systems:  cp -r TextToGeometry /path/to/FreeCAD/Mod/
 # (FreeCAD 1.1 uses the versioned path:  ~/.local/share/FreeCAD/v1-1/Mod/)
@@ -99,6 +114,18 @@ Then start FreeCAD. The **TextToGeometry** tab appears under *Workbenches*.
 **Option B — as part of a FreeCAD build**
 
 Add this directory to `src/Mod/` (it ships a `CMakeLists.txt`) and rebuild.
+
+### start.sh — one-stop helper
+
+```sh
+./start.sh            # GUI starten (prüft FreeCAD, pi-CLI, Ollama)
+./start.sh sync       # Entwicklung -> FreeCAD-Mod-Pfad (v1-1) kopieren
+./start.sh test       # alle Test-Suites (core, ext, skills) mit FreeCADCmd
+./start.sh help
+```
+
+Environment-Uberschreibungen: `FREECAD`, `FREECAD_CMD`, `T2G_PI_BIN`,
+`OLLAMA_MODEL`, `T2G_FREECAD_VER` (Default `1-1`), `DISPLAY`.
 
 ## Use — basic (one variant)
 
@@ -139,8 +166,112 @@ Add this directory to `src/Mod/` (it ships a `CMakeLists.txt`) and rebuild.
    *Zielverfehlungen + Messwerte als Feedback an das Modell zurückgeben* ticked.
 5. Optional: enable *Ergebnisse + Messwerte als CSV exportieren* and choose a path.
 6. Click **Generieren**. Each variant is generated, measured and checked; on a
-   miss the values are fed back for up to the configured number of iterations.
-   **Stop** aborts the sweep after the current iteration.
+    miss the values are fed back for up to the configured number of iterations.
+    **Stop** aborts the sweep after the current iteration.
+
+## Use — 2D drawing (SVG) → 3D
+
+1. Prepare a 2D front elevation as an SVG file whose `<desc>` element contains a
+   machine-readable spec (this is what the LLM actually reads — the graphics are
+   just for humans/tools):
+   - **units**,
+   - the **coordinate mapping** (e.g. drawing X → FreeCAD X, height H → Z,
+     depth → Y),
+   - the **element list** with coordinates and section sizes
+     (e.g. `piar 1: x 175..325, H 0..1100, depth 400, section 150x150`).
+
+   `Resources/drawings/bridge.svg` is a complete reference: a truss bridge with
+   piers, deck, verticals, top chord and diagonals — all listed in its `<desc>`.
+
+2. In the dialog pick **2D-Zeichnung (SVG)** under *Varianten-Quelle*.
+3. Point the path at your SVG and click **Zeichnung laden** — the `<desc>` spec
+   is displayed for review.
+4. (Optional) add **Ziele** and pick a **Material** as with the other modes.
+5. Click **Generieren**. The spec is turned into a build prompt (coordinate
+   mapping, axis-aligned boxes, `bar()` helper for diagonals), sent to the LLM,
+   executed in the sandbox and the solids are added to the document.
+
+Programmatic use (no GUI needed):
+
+```python
+import T2GCore
+spec   = T2GCore.load_drawing_spec("mybridge.svg")     # <desc> text, validated
+prompt = T2GCore.build_drawing_prompt(spec)            # full build prompt
+raw    = T2GCore.run_backend(prompt, pi_binary=...)
+code   = T2GCore.extract_code_block(raw)
+shapes = T2GCore.exec_code_in_sandbox(code)            # list of Part.Shape
+```
+
+## Use — Skill (deterministischer Generator)
+
+Skills are parameterized Python build functions. No LLM, fully reproducible,
+fast. Files: `Skills/<name>/<name>.py`.
+
+```python
+T2G_SKILL = {
+    "name": "bruecke",
+    "description": "...",
+    "parameters": [
+        ("span", "Gesamltes", "mm", 2000, 100, 50000),
+        ("deck_t", "Fahrbahn-Dicke", "mm", 100, 10, 500),
+        ...
+    ],
+    "dependencies": ["Part", "FreeCAD", "math"],
+    "rules": ["collision", "connectivity"],
+}
+
+def build(params):
+    span = params["span"]
+    ...
+    return [Part.makeBox(...), bar(...), ...]
+```
+
+Dialog (tab **Skill & Backend**):
+
+1. Select a skill (e.g., `bruecke`) — the parameter form is filled in with
+   defaults, min/max is enforced.
+2. Adjust the parameters as needed.
+3. **Build** → all solids are added to the active document, and test warnings
+   (kollisionen, disconnects) are shown in the log.
+
+Programmatic:
+
+```python
+import T2GSkills
+eng = T2GSkills.get_engine("Skills")          # load all skills
+shapes, vals, issues = eng.build("bruecke", {"span": 2500})
+shapes   # list[Part.Shape]
+vals     # normalized parameter dict (default values applied)
+issues   # list[str] — kollision/konnektivitaet violations if any
+```
+
+**Skill-Designer** (same tab): Name, description, one row per parameter
+(namens;label;einheit;default;min;max), and the full `build(params)` code —
+then **Speichern unter …**. New skills appear immediately in the combo box.
+
+## Use — Backend configuration (Ollama / OpenAI-kompatibel)
+
+Under **Skill & Backend → LLM / Backend**:
+
+| Backend | URL pattern | Example |
+|---------|-------------|---------|
+| `pi` | CLI binary (`T2G_PI_BIN`) | `~/.npm-global/bin/pi` |
+| `openai` | `…/v1/chat/completions` | `http://localhost:11434/v1` (Ollama OpenAI mode) |
+| `ollama` | `…/api/chat` | `http://localhost:11434` |
+
+Fields: Base-URL (auto-switching between OpenAI mode and native Ollama mode),
+Modell, API-Key (password field). **Verbindung testen** sends a minimal prompt
+without touching the document.
+
+Programmatic:
+
+```python
+import T2GCore
+cfg  = T2GCore.APIConfig(kind="ollama",
+                         base_url="http://localhost:11434",
+                         model="qwen-gross:latest")
+code, shapes = T2GCore.generate_via_api("a 10x10x10 box", cfg=cfg)
+```
 
 ## Files
 
@@ -149,11 +280,18 @@ Add this directory to `src/Mod/` (it ships a `CMakeLists.txt`) and rebuild.
 | `Init.py` | FreeCAD package marker (headless init). |
 | `InitGui.py` | GUI init — registers the workbench + command. |
 | `T2GCommand.py` | Workbench class, command, dialog (source/target/material/sweep UI), worker thread. |
-| `T2GCore.py` | Backend: pi invocation, NDJSON parse, prompt build, code extraction, sandbox, measurement, table readers, sweep engine, CSV export. Stdlib-only. |
-| `test_core.py` | 7 headless unit tests (sandbox / parse). No FreeCAD needed. |
+| `T2GCore.py` | Backend: pi invocation, NDJSON parse, prompt build, **drawing-spec loading (`load_drawing_spec`) + drawing prompt build (`build_drawing_prompt`)**, code extraction, sandbox, measurement, table readers, sweep engine, CSV export. Stdlib-only. |
+| `test_core.py` | 13 headless unit tests (sandbox / parse / drawing spec). No FreeCAD needed. |
 | `test_ext.py` | 14 headless unit tests (targets, measurement, table readers, sweep engine, CSV). Fake-`Part` only — no FreeCAD/model needed. |
+| `test_skills.py` | 14 tests for the skill engine (params, validation, load/build, `create_skill` roundtrip, rules). |
+| `T2GSkills.py` | Skill engine: `SkillParam`/`SkillDefinition`, sandboxed exec (`_safe_import` Whitelist), `SkillRegistry`, `SkillEngine`, `apply_rules` (kollision/konnektivitaet), `create_skill`. |
+| `Skills/bruecke/bruecke.py` | Reference skill: parametrische Fachwerkbrücke (10 Parameter, 13 Solids at defaults). |
+| `start.sh` | Helfer: `gui`/`sync`/`test` + Dependency-Checks. |
+| `DOKUMENTATION.md` | Anwender-Dokumentation auf Deutsch (Zwecke, Workflows, Skills, Backends). |
 | `e2e_freecad.py` | End-to-end single-prompt test in a real FreeCAD (model required). |
 | `e2e_sweep_freecad.py` | End-to-end **sweep** test in real FreeCAD with the **real** LLM pipeline (model required). |
+| `e2e_bridge_drawing.py` | End-to-end **2D drawing → 3D** test: `bridge.svg` `<desc>` → LLM → 13 solids (model required). |
+| `Resources/drawings/bridge.svg` | Reference 2D truss-bridge elevation with a machine-readable `<desc>` spec (units, mapping, elements). |
 | `Resources/icons/text-to-geometry.svg` | Toolbar icon. |
 | `Resources/licenses/LGPL-2.1-or-later.txt` | License. |
 | `package.xml` | Addon Manager metadata. |
@@ -166,7 +304,7 @@ tested directly in plain CPython:
 
 ```sh
 cd TextToGeometry
-python3 test_core.py   # 7 headless sandbox / parse tests
+python3 test_core.py   # 13 headless sandbox / parse / drawing-spec tests
 python3 test_ext.py    # 14 headless target / measure / table / sweep / csv tests
 ```
 
@@ -182,11 +320,12 @@ PY
 ```
 
 Execution of generated solids (`Part.makeBox`, …) and the end-to-end tests
-(`e2e_freecad.py`, `e2e_sweep_freecad.py`) only run inside a FreeCAD, where the
-`Part` module is provided:
+(`e2e_freecad.py`, `e2e_sweep_freecad.py`, `e2e_bridge_drawing.py`) only run
+inside a FreeCAD, where the `Part` module is provided:
 
 ```sh
-T2G_PI_BIN=/path/to/pi FreeCADCmd e2e_sweep_freecad.py   # writes sweep_result.txt
+T2G_PI_BIN=/path/to/pi FreeCADCmd e2e_sweep_freecad.py    # writes sweep_result.txt
+T2G_PI_BIN=/path/to/pi FreeCADCmd e2e_bridge_drawing.py   # writes T2G_OUT (bridge 2D->3D)
 ```
 
 ## Troubleshooting

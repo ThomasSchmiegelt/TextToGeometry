@@ -13,6 +13,7 @@ and measurements, feedback-controlled loop, CSV export.
 
 from __future__ import annotations
 
+import base64
 import csv
 import json
 import math
@@ -24,6 +25,8 @@ import shutil
 import subprocess
 import tempfile
 import textwrap
+import urllib.request
+import urllib.error
 import zipfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -126,6 +129,148 @@ Current state (measured from previous code):
 Criteria feedback (previous code):
 {feedback_lines}
 """
+
+
+# ---------------------------------------------------------------------------
+# Part 2b: external LLM API (OpenAI-compatible / Ollama endpoints)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class APIConfig:
+    """Settings for calling an LLM directly over HTTP (bypasses the `pi` CLI).
+
+    Compatible with every OpenAI-style endpoint (OpenAI, OpenRouter,
+    LM Studio, vLLM, llama.cpp server, ...) and with Ollama's native
+    ``/api/chat`` endpoint when ``kind="ollama"``.
+    """
+
+    kind: str = "openai"            # "openai" | "ollama"
+    base_url: str = "http://localhost:11434/v1"
+    model: str = "qwen-gross:latest"
+    api_key: str = ""
+    temperature: float = 0.2
+    max_tokens: int = 8192
+    timeout_s: int = 180
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": self.kind, "base_url": self.base_url,
+            "model": self.model, "api_key": self.api_key,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens, "timeout_s": self.timeout_s,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "APIConfig":
+        valid = {f.name for f in cls.__dataclass_fields__.values()}
+        return cls(**{k: v for k, v in (d or {}).items() if k in valid})
+
+    def describe(self) -> str:
+        key = self.api_key
+        masked = (key[:4] + "…" + key[-2:]) if len(key) > 8 else ("***" if key else "")
+        return (f"{self.kind} {self.base_url} model={self.model} key={masked or '-'}")
+
+
+def _t2g_api_call(cfg: APIConfig, system_prompt: str, user_prompt: str) -> str:
+    if cfg.kind == "ollama":
+        base = cfg.base_url.rstrip("/")
+        if base.endswith("/v1"):
+            base = base[:-3].rstrip("/")
+        url = base + "/api/chat"
+        body = {
+            "model": cfg.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "stream": False,
+            "options": {"temperature": cfg.temperature},
+        }
+        headers = {"Content-Type": "application/json"}
+    else:
+        url = cfg.base_url.rstrip("/")
+        if not url.endswith("/chat/completions"):
+            url = url + "/chat/completions"
+        body = {
+            "model": cfg.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": cfg.temperature,
+        }
+        if cfg.max_tokens > 0:
+            body["max_tokens"] = cfg.max_tokens
+        headers = {"Content-Type": "application/json"}
+        if cfg.api_key:
+            headers["Authorization"] = "Bearer " + cfg.api_key
+
+    req = urllib.request.Request(
+        url, data=json.dumps(body).encode("utf-8"),
+        headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=cfg.timeout_s) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", "replace")[:500]
+        except Exception:
+            pass
+        raise BackendError(f"API failed: HTTP {e.code} from {url} {detail}", "", int(e.code))
+    except urllib.error.URLError as e:
+        raise BackendError(f"API unreachable: {url} ({e.reason})", "", -1)
+
+    if cfg.kind == "ollama":
+        msg = payload.get("message") or {}
+        text = msg.get("content", "")
+    else:
+        choices = payload.get("choices") or []
+        if not choices:
+            raise T2GError(f"API returned no choices: {str(payload)[:300]}")
+        text = (choices[0].get("message") or {}).get("content", "")
+    if not text or not text.strip():
+        raise T2GError("API returned an empty message.")
+    return text
+
+
+class _CodeStream:
+    """Wraps a plain code string as the pi NDJSON stream structure so
+    ``extract_code_block`` / ``_strip_fenced_python`` work unchanged."""
+
+    def __init__(self, code: str) -> None:
+        self._doc = json.dumps({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "```python\n" + code + "\n```"}],
+            },
+        })
+
+
+def run_api(prompt: str, *, cfg: APIConfig | None = None,
+            system_prompt: str = SYSTEM_PROMPT) -> str:
+    """Call an external LLM API (code block is extracted by callers
+    through the standard ``extract_code_block`` path)."""
+    if not (prompt or "").strip():
+        raise BackendError("Empty prompt.")
+    cfg = cfg or APIConfig()
+    text = _t2g_api_call(cfg, system_prompt, prompt)
+    code = _strip_fenced_python(text)
+    return json.dumps({
+        "type": "message_end",
+        "message": {"role": "assistant",
+                    "content": [{"type": "text",
+                                 "text": "```python\n" + code + "\n```"}]},
+    })
+
+
+def generate_via_api(prompt: str, *, cfg: APIConfig | None = None) -> tuple[str, list]:
+    """Single-prompt generation through the external API (code, shapes)."""
+    raw = run_api(prompt, cfg=cfg)
+    code = extract_code_block(raw)
+    shapes = exec_code_in_sandbox(code)
+    return code, shapes
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +473,71 @@ def build_prompt(base_prompt: str,
         ))
     out.append("\nReturn only the Python code block, exactly as before.")
     return "\n".join(out)
+
+
+# ---------------------------------------------------------------------------
+# Part 5b: 2D drawing (SVG) -> 3D pipeline
+# ---------------------------------------------------------------------------
+
+def load_drawing_spec(svg_path: str) -> str:
+    """Return the text of the <desc> element of an SVG drawing.
+
+    The <desc> block is the machine-readable part of the drawing: it must
+    contain units, coordinate conventions and every element with its
+    coordinates (see Resources/drawings/bridge.svg for the reference layout).
+    Namespaced and plain <desc> are both accepted; a missing/empty block is
+    an error.
+    """
+    if not os.path.isfile(svg_path):
+        raise T2GError(f"Drawing file not found: {svg_path}")
+    try:
+        tree = ET.parse(svg_path)
+    except ET.ParseError as e:
+        raise T2GError(f"Drawing is not valid XML/SVG: {e}") from e
+    desc_el = tree.find("{http://www.w3.org/2000/svg}desc")
+    if desc_el is None:
+        desc_el = tree.find("desc")
+    if desc_el is None or not (desc_el.text or "").strip():
+        raise T2GError(
+            f"Drawing has no <desc> specification block: {svg_path}\n"
+            "<desc> must describe units, coordinate mapping and all elements "
+            "with their coordinates (see Resources/drawings/bridge.svg).")
+    return desc_el.text.strip()
+
+
+DRAWING_3D_RULES = """\
+3D INTERPRETATION (STRICT)
+- Coordinate mapping: drawing X -> FreeCAD X; drawing height H -> FreeCAD Z (ground at Z=0); depth (into the page) -> FreeCAD Y.
+- Axis-aligned elements (piars, deck, verticals, chords, walls, ...):
+  Part.makeBox(x_to - x_from, depth, h_to - h_from) placed at (x_from, y_from, h_from).
+- Put the total depth range at Y 0..<depth from the spec>; centre bars in Y where a section depth is given.
+- Diagonals are square bars. Use exactly this helper (a def is allowed):
+    def bar(x1, h1, x2, h2, t, yc):
+      import math
+      dx = x2 - x1
+      dz = h2 - h1
+      L = math.hypot(dx, dz)
+      a = math.degrees(math.atan2(dx, dz))
+      b = Part.makeBox(t, t, L)
+      b.translate(FreeCAD.Vector(-0.5 * t, -0.5 * t, 0))
+      b.translate(FreeCAD.Vector(x1, yc, h1))
+      b.rotate(FreeCAD.Vector(x1, yc, h1), FreeCAD.Vector(0, 1, 0), a)
+      return b
+  (it starts at (x1, yc, h1) and ends at (x2, yc, h2) with square section t).
+- Build exactly the element list given in the spec, one solid per element.
+- Return one code block; end with: result = [all solids]
+"""
+
+
+def build_drawing_prompt(spec: str) -> str:
+    """Build the prompt that turns a 2D elevation spec into 3D solids."""
+    if not spec or not spec.strip():
+        raise T2GError("Drawing spec is empty.")
+    return (
+        "Build this structure as 3D solids in FreeCAD, from its 2D front-elevation spec.\n\n"
+        "DRAWING SPEC (2D elevation):\n" + spec.strip() + "\n\n"
+        + DRAWING_3D_RULES
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -865,8 +1075,11 @@ def _iter_import_names(code: str):
 # Convenience single-shot
 # ---------------------------------------------------------------------------
 
-def _generate_once(prompt: str) -> tuple[str, object]:
+def _generate_once(prompt: str, *, api_config: APIConfig | None = None
+                   ) -> tuple[str, object]:
     """One prompt -> (code, shapes). Used as generate_fn for run_sweep()."""
+    if api_config is not None:
+        return generate_via_api(prompt, cfg=api_config)
     pi = find_pi_binary()
     raw = run_backend(prompt, pi_binary=pi)
     code = extract_code_block(raw)
@@ -876,8 +1089,16 @@ def _generate_once(prompt: str) -> tuple[str, object]:
 
 def generate(prompt: str, *, pi_binary: str | None = None,
              provider: str = "ollama", model: str = "qwen-gross:latest",
-             timeout_s: int = 120) -> tuple[str, list]:
-    """Backwards-compatible single-prompt generation (code, shapes)."""
+             timeout_s: int = 120,
+             api_config: APIConfig | None = None) -> tuple[str, list]:
+    """Backwards-compatible single-prompt generation (code, shapes).
+
+    Pass ``api_config`` to route the prompt through an external
+    LLM API endpoint (OpenAI-compatible or Ollama) instead of the
+    ``pi`` CLI.
+    """
+    if api_config is not None:
+        return generate_via_api(prompt, cfg=api_config)
     pi = pi_binary or find_pi_binary()
     raw = run_backend(prompt, pi_binary=pi, provider=provider,
                       model=model, timeout_s=timeout_s)
@@ -895,4 +1116,5 @@ __all__ = [
     "read_table_csv", "read_table_xlsx", "read_table_ssheet", "read_table_paste",
     "VariantResult", "SweepConfig", "run_sweep",
     "export_results_csv",
+    "APIConfig", "run_api", "generate_via_api",
 ]

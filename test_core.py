@@ -101,4 +101,50 @@ except T.T2GError as e:
 else:
     raise AssertionError("missing result was not caught")
 
+# ---- 8. load_drawing_spec (namespaced + plain <desc>) ----
+import xml.etree.ElementTree as _ET
+def _write_svg(path, ns, body):
+    attr = f' xmlns="{ns}"' if ns else ""
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(f"<svg{attr}>{body}</svg>")
+tmp_ok = os.path.join(tempfile.gettempdir(), "t2g_test_ok.svg")
+_write_svg(tmp_ok, "http://www.w3.org/2000/svg",
+           "<desc>UNITS mm\npiar x 0..100 H 0..200</desc>")
+spec = T.load_drawing_spec(tmp_ok)
+assert "mm" in spec and "piar" in spec, spec
+print("[8] load_drawing_spec namespaced OK ->", spec[:40].replace("\n"," "))
+
+tmp_plain = os.path.join(tempfile.gettempdir(), "t2g_test_plain.svg")
+_write_svg(tmp_plain, "", "<desc>PLAIN spec text</desc>")
+assert T.load_drawing_spec(tmp_plain) == "PLAIN spec text"
+print("[9] load_drawing_spec plain OK")
+
+# ---- 8b. load_drawing_spec errors ----
+tmp_nodesc = os.path.join(tempfile.gettempdir(), "t2g_test_nodesc.svg")
+_write_svg(tmp_nodesc, "http://www.w3.org/2000/svg", "<rect x='0'/>")
+try:
+    T.load_drawing_spec(tmp_nodesc)
+except T.T2GError as e:
+    print("[10] no <desc> rejected OK ->", str(e)[:60])
+else:
+    raise AssertionError("svg without <desc> was (wrongly) accepted")
+try:
+    T.load_drawing_spec(os.path.join(tempfile.gettempdir(), "no_such_file.svg"))
+except T.T2GError as e:
+    print("[11] missing file rejected OK")
+else:
+    raise AssertionError("missing file was (wrongly) accepted")
+
+# ---- 12. build_drawing_prompt ----
+prompt = T.build_drawing_prompt(spec)
+assert "DRAWING SPEC" in prompt and "3D INTERPRETATION" in prompt, prompt[:120]
+assert "result = [all solids]" in prompt
+print("[12] build_drawing_prompt OK  len=", len(prompt))
+try:
+    T.build_drawing_prompt("   ")
+except T.T2GError:
+    print("[13] empty spec rejected OK")
+else:
+    raise AssertionError("empty spec was (wrongly) accepted")
+
 print("ALL CORE TESTS PASSED")

@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 )
 
 import T2GCore
+import T2GSkills
 
 
 # ---------------------------------------------------------------------------
@@ -185,17 +186,36 @@ class T2GDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Text to Geometry")
-        self.resize(780, 640)
+        self.resize(880, 640)
 
         self._worker: _SweepWorker | None = None
         self._goals: list[_GoalWidget] = []
 
         root = QVBoxLayout(self)
-        root.addWidget(self._build_source_group())
-        root.addWidget(self._build_target_group())
-        root.addWidget(self._build_material_group())
-        root.addWidget(self._build_loop_group())
-        root.addWidget(self._build_result_group())
+
+        self.main_tabs = QTabWidget()
+
+        tab_gen = QWidget()
+        gen_v = QVBoxLayout(tab_gen)
+        gen_v.setContentsMargins(6, 6, 6, 6)
+        gen_v.addWidget(self._build_source_group())
+        gen_v.addWidget(self._build_target_group())
+        gen_v.addWidget(self._build_material_group())
+        gen_v.addWidget(self._build_loop_group())
+        gen_v.addWidget(self._build_result_group())
+        gen_v.addStretch(1)
+        self.main_tabs.addTab(tab_gen, "LLM-Generierung")
+
+        tab_skill = QWidget()
+        sk_v = QVBoxLayout(tab_skill)
+        sk_v.setContentsMargins(6, 6, 6, 6)
+        sk_v.addWidget(self._build_skill_group())
+        sk_v.addWidget(self._build_skill_creator_group())
+        sk_v.addWidget(self._build_api_group())
+        sk_v.addStretch(1)
+        self.main_tabs.addTab(tab_skill, "Skill & Backend")
+
+        root.addWidget(self.main_tabs, 1)
 
         self.log_edit = QPlainTextEdit()
         self.log_edit.setReadOnly(True)
@@ -230,16 +250,18 @@ class T2GDialog(QDialog):
 
         self.src_group = QButtonGroup(self)
         self.src_prompt_rb = QRadioButton("Freitext (eine Variante)")
+        self.src_dwg_rb = QRadioButton("2D-Zeichnung (SVG)")
         self.src_csv_rb = QRadioButton("CSV-Datei")
         self.src_xlsx_rb = QRadioButton("XLSX-Datei")
         self.src_sheet_rb = QRadioButton("FreeCAD-Spreadsheet")
         self.src_paste_rb = QRadioButton("Eingefügte Tabelle")
         for rb, id_ in [
             (self.src_prompt_rb, 0),
-            (self.src_csv_rb, 1),
-            (self.src_xlsx_rb, 2),
-            (self.src_sheet_rb, 3),
-            (self.src_paste_rb, 4),
+            (self.src_dwg_rb, 1),
+            (self.src_csv_rb, 2),
+            (self.src_xlsx_rb, 3),
+            (self.src_sheet_rb, 4),
+            (self.src_paste_rb, 5),
         ]:
             self.src_group.addButton(rb, id_)
             lay.addWidget(rb)
@@ -256,6 +278,28 @@ class T2GDialog(QDialog):
             "4x M8 auf 60 BDK")
         l.addWidget(self.prompt_edit)
         self.src_stack.addTab(w, "Freitext")
+
+        w = QWidget()
+        l = QVBoxLayout(w); l.setContentsMargins(0, 0, 0, 0)
+        l.addWidget(QLabel("2D-Zeichnung (SVG) mit <desc>-Spezifikation:"))
+        row = QHBoxLayout()
+        self.dwg_path = QLineEdit()
+        self.dwg_path.setPlaceholderText(
+            os.path.join(os.path.dirname(__file__), "Resources/drawings/bridge.svg"))
+        pv = QPushButton("…")
+        pv.clicked.connect(self._dwg_pick)
+        row.addWidget(self.dwg_path); row.addWidget(pv)
+        l.addLayout(row)
+        self.dwg_spec_edit = QPlainTextEdit()
+        self.dwg_spec_edit.setPlaceholderText(
+            "Lade die Datei, um die <desc>-Spezifikation zu sehen "
+            "(Einheiten, Koordinaten-Mapping, Elemente mit Koordinaten).")
+        self.dwg_spec_edit.setReadOnly(True)
+        self.dwg_spec_btn = QPushButton("Zeichnung laden")
+        self.dwg_spec_btn.clicked.connect(self._dwg_load_spec)
+        l.addWidget(self.dwg_spec_btn)
+        l.addWidget(self.dwg_spec_edit, 1)
+        self.src_stack.addTab(w, "Zeichnung (SVG)")
 
         w = QWidget()
         l = QVBoxLayout(w); l.setContentsMargins(0, 0, 0, 0)
@@ -301,7 +345,7 @@ class T2GDialog(QDialog):
         l.addWidget(self.paste_edit)
         self.src_stack.addTab(w, "Einfügen")
 
-        ids = [0, 1, 2, 3, 4]
+        ids = [0, 1, 2, 3, 4, 5]
         for rb in self.src_group.buttons():
             t = self.src_group.id(rb)
             rb.toggled.connect(
@@ -382,6 +426,316 @@ class T2GDialog(QDialog):
         lay.addWidget(pv)
         return box
 
+    # ------------------------------------------------------------ skills --
+
+    def _skills_engine(self) -> T2GSkills.SkillEngine:
+        try:
+            return T2GSkills.get_engine(T2GSkills.SkillEngine._default_skills_dir())
+        except Exception:
+            return T2GSkills.SkillEngine().load_all()
+
+    def _build_skill_group(self) -> QGroupBox:
+        box = QGroupBox("Skill (deterministischer, parametrischer Generator)")
+        lay = QVBoxLayout(box)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Skill:"))
+        self.skill_combo = QComboBox()
+        row.addWidget(self.skill_combo)
+        refresh = QPushButton("↻")
+        refresh.setToolTip("Skill-Verzeichnis neu laden")
+        refresh.clicked.connect(self._skill_refresh)
+        row.addWidget(refresh)
+        row.addStretch(1)
+        self.skill_build_btn = QPushButton("Bauen")
+        self.skill_build_btn.setEnabled(False)
+        self.skill_build_btn.clicked.connect(self._skill_build)
+        row.addWidget(self.skill_build_btn)
+        lay.addLayout(row)
+
+        self.skill_param_form = QFormLayout()
+        lay.addLayout(self.skill_param_form)
+        self.skill_hint = QLabel("")
+        self.skill_hint.setWordWrap(True)
+        lay.addWidget(self.skill_hint)
+        self._skill_params: list = []
+        self._skill_loaded = None
+        self.skill_combo.currentIndexChanged.connect(self._skill_load)
+        self._skill_refresh()
+        return box
+
+    def _skill_refresh(self) -> None:
+        while self.skill_param_form.count():
+            item = self.skill_param_form.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+            el = item.layout()
+            if el is not None:
+                el.deleteLater()
+        self._skill_params = []
+        self._skill_loaded = None
+        self.skill_build_btn.setEnabled(False)
+
+        eng = self._skills_engine()
+        names = eng.registry.names()
+        try:
+            cur = self.skill_combo.currentText()
+        except Exception:
+            cur = ""
+        self.skill_combo.blockSignals(True)
+        self.skill_combo.clear()
+        self.skill_combo.insertItem(0, "<wählen>")
+        for n in names:
+            self.skill_combo.addItem(n)
+        idx = self.skill_combo.findText(cur)
+        if idx < 0:
+            idx = self.skill_combo.findText("bruecke")
+        self.skill_combo.setCurrentIndex(max(0, idx))
+        self.skill_combo.blockSignals(False)
+        self._skill_load()
+
+    def _skill_load(self) -> None:
+        name = self.skill_combo.currentText().strip()
+        if name in ("", "<wählen>"):
+            self._skill_loaded = None
+            self.skill_build_btn.setEnabled(False)
+            self.skill_hint.setText(
+                "Kein Skill gewählt. Verfügbare: " +
+                (", ".join(self._skills_engine().registry.names()) or "–"))
+            return
+        try:
+            eng = self._skills_engine()
+            loaded = eng.registry.get(name)
+        except Exception as e:
+            self.skill_hint.setText(f"Skill konnte nicht geladen werden: {e}")
+            self.skill_build_btn.setEnabled(False)
+            self._skill_loaded = None
+            return
+        self._skill_loaded = loaded
+        self._skill_params = []
+        for p in loaded.definition.params:
+            sp = QDoubleSpinBox()
+            sp.setRange(-1e12, 1e12)
+            sp.setDecimals(6)
+            if p.kind == "int":
+                sp.setDecimals(0)
+                sp.setSingleStep(1)
+            sp.setValue(float(p.default) if p.default is not None else 0.0)
+            self.skill_param_form.addRow(p.label + (f" [{p.unit}]" if p.unit else ""), sp)
+            self._skill_params.append((p, sp))
+            p_name = p
+            if p_name.min is not None:
+                sp.setMinimum(float(p_name.min))
+            if p_name.max is not None:
+                sp.setMaximum(float(p_name.max))
+        rules = ", ".join(loaded.definition.pruefregeln) or "–"
+        self.skill_hint.setText(
+            f"{loaded.definition.description}\nPrüfregeln: {rules}")
+        self.skill_build_btn.setEnabled(True)
+
+    def _skill_params_values(self) -> dict:
+        out = {}
+        for p, sp in self._skill_params:
+            out[p.name] = sp.value()
+        return out
+
+    def _skill_build(self) -> None:
+        if self._skill_loaded is None:
+            QMessageBox.warning(self, "Skill", "Bitte zuerst einen Skill wählen.")
+            return
+        name = self._skill_loaded.name
+        try:
+            eng = self._skills_engine()
+            shapes, vals, problems = eng.build(name, self._skill_params_values())
+        except T2GSkills.SkillError as e:
+            QMessageBox.critical(self, "Skill", f"Parameter ungültig:\n{e}")
+            return
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, "Skill", f"Build fehlgeschlagen:\n{e}")
+            return
+        if problems:
+            self.log_edit.appendPlainText(
+                "Skill " + name + " – Prüfwarnungen:\n"
+                + "\n".join(problems))
+        self._add_skill_shapes(name, shapes, problems)
+        self.progress_label.setText(
+            f"Skill {name}: {len(shapes)} Solid(s) gebaut, Parameter: "
+            + ", ".join(f"{k}={v:g}" for k, v in vals.items()))
+
+    def _add_skill_shapes(self, name: str, shapes: list, problems: list) -> None:
+        doc = FreeCAD.ActiveDocument
+        if doc is None:
+            doc = FreeCAD.newDocument("T2G")
+        base = len(doc.Objects)
+        added = 0
+        for j, shp in enumerate(shapes):
+            try:
+                obj = doc.addObject("Part::Feature", f"T2G_SKILL_{base + added:03d}")
+            except Exception:
+                obj = doc.addObject("App::FeaturePython", f"T2G_SKILL_{base + added:03d}")
+            try:
+                obj.Shape = shp
+            except Exception:
+                pass
+            obj.Label = f"T2G {name} [{j + 1}/{len(shapes)}]"
+            added += 1
+        if added:
+            doc.recompute()
+            try:
+                FreeCADGui.SendMsgToActiveView("ViewFit")
+            except Exception:
+                pass
+        status = "OK" if not problems else "WITH WARNINGS"
+        FreeCAD.Console.PrintMessage(
+            f"TextToGeometry: Skill {name}: {added} Solid(s) ({status}).\n")
+
+    def _build_skill_creator_group(self) -> QGroupBox:
+        box = QGroupBox("Skill-Designer (neuen Skill erzeugen)")
+        lay = QFormLayout(box)
+        self.sc_name = QLineEdit("meine_kiste")
+        self.sc_desc = QLineEdit("Einfache Kiste mit parametrischen Maßen.")
+        lay.addRow("Name:", self.sc_name)
+        lay.addRow("Beschreibung:", self.sc_desc)
+        self.sc_params = QPlainTextEdit(
+            "w;Breite;mm;100;1;1000\nh;Höhe;mm;50;1;1000\nd;Dicke;mm;20;1;500")
+        self.sc_params.setPlaceholderText(
+            "pro Zeile: name;label;einheit;default;min;max")
+        lay.addRow("Parameter:", self.sc_params)
+        self.sc_code = QPlainTextEdit()
+        self.sc_code.setPlaceholderText(
+            "def build(params):\n"
+            "    import Part, FreeCAD\n"
+            "    w = params['w']; h = params['h']; d = params['d']\n"
+            "    return [Part.makeBox(w, h, d, FreeCAD.Vector(0, 0, 0))]\n")
+        lay.addRow("build-Code:", self.sc_code)
+        row = QHBoxLayout()
+        btn = QPushButton("Speichern unter…")
+        btn.clicked.connect(self._skill_create)
+        row.addStretch(1)
+        row.addWidget(btn)
+        self.sc_status = QLabel("")
+        row.addWidget(self.sc_status)
+        lay.addRow(row)
+        return box
+
+    def _skill_create(self) -> None:
+        name = self.sc_name.text().strip()
+        desc = self.sc_desc.text().strip()
+        code = self.sc_code.toPlainText()
+        params = []
+        for ln in self.sc_params.toPlainText().splitlines():
+            ln = ln.strip()
+            if not ln or ln.startswith("#"):
+                continue
+            parts = [c.strip() for c in ln.split(";")]
+            if len(parts) < 4:
+                self.sc_status.setText(f"Zeile unvollständig: {ln!r}")
+                continue
+            nm, lb, unit, df = parts[0], parts[1], parts[2], parts[3]
+            lo = float(parts[4]) if len(parts) > 4 and parts[4] else None
+            hi = float(parts[5]) if len(parts) > 5 and parts[5] else None
+            try:
+                dflt = int(df) if "." not in df else float(df)
+            except ValueError:
+                self.sc_status.setText(f"Default ungültig bei {nm!r}: {df!r}")
+                return
+            params.append((nm, lb, unit, dflt, lo, hi))
+        if not params:
+            self.sc_status.setText("Mindestens ein Parameter fehlt.")
+            return
+        out_dir = QFileDialog.getExistingDirectory(self, "Skill-Verzeichnis")
+        if not out_dir:
+            return
+        try:
+            path = T2GSkills.create_skill(
+                name, desc or "Benutzerdefinierte Skill", params, code,
+                out_dir=out_dir)
+        except T2GSkills.SkillError as e:
+            QMessageBox.critical(self, "Skill-Designer", str(e))
+            return
+        self.sc_status.setText("Erstellt: " + path)
+        self._skill_refresh()
+        self.skill_combo.setCurrentText(name)
+        QMessageBox.information(self, "Skill-Designer",
+                                "Skill gespeichert:\n" + path)
+
+    # --------------------------------------------------------------- api --
+
+    def _build_api_group(self) -> QGroupBox:
+        box = QGroupBox("LLM / Backend")
+        form = QFormLayout(box)
+        self.api_kind = QComboBox()
+        self.api_kind.addItem("pi CLI (Standard, T2G_PI_BIN)", "pi")
+        self.api_kind.addItem("OpenAI-kompatibel (HTTP)", "openai")
+        self.api_kind.addItem("Ollama (nativ)", "ollama")
+        form.addRow("Backend:", self.api_kind)
+        self.api_kind.currentIndexChanged.connect(self._api_kind_changed)
+
+        self.api_base = QLineEdit("http://localhost:11434/v1")
+        self.api_base.setPlaceholderText("http://host:port/v1  (OpenAI-kompatibel)")
+        form.addRow("Base-URL:", self.api_base)
+        self.api_model = QLineEdit("qwen-gross:latest")
+        form.addRow("Modell:", self.api_model)
+        self.api_key = QLineEdit()
+        self.api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.api_key.setPlaceholderText("API-Schlüssel (optional, z. B. Ollama=NONE)")
+        form.addRow("API-Key:", self.api_key)
+        row = QHBoxLayout()
+        self.api_test_btn = QPushButton("Verbindung testen")
+        self.api_test_btn.clicked.connect(self._api_test)
+        row.addWidget(self.api_test_btn)
+        row.addStretch(1)
+        form.addRow(row)
+        self._current_api_kind = "pi"
+        self._api_kind_changed(0)
+        return box
+
+    _API_BASE_DEFAULTS = {
+        "pi": "",
+        "openai": "http://localhost:11434/v1",
+        "ollama": "http://localhost:11434",
+    }
+
+    def _api_kind_changed(self, _idx: int) -> None:
+        kind = self.api_kind.currentData()
+        self._current_api_kind = kind
+        show_http = kind in ("openai", "ollama")
+        cur = self.api_base.text().strip()
+        if cur == "" or cur in self._API_BASE_DEFAULTS.values():
+            self.api_base.setText(self._API_BASE_DEFAULTS.get(kind, ""))
+        self.api_base.setEnabled(show_http)
+        self.api_model.setEnabled(show_http)
+        self.api_key.setEnabled(show_http)
+        self.api_test_btn.setEnabled(show_http)
+
+    def _api_config(self) -> T2GCore.APIConfig:
+        return T2GCore.APIConfig(
+            kind=self._current_api_kind,
+            base_url=self.api_base.text().strip(),
+            model=self.api_model.text().strip(),
+            api_key=self.api_key.text().strip(),
+        )
+
+    def _api_test(self) -> None:
+        import T2GCore as _c
+        cfg = self._api_config()
+        if cfg.kind == "pi":
+            self.api_test_result("pi-CLI: kein HTTP-Test, nutzt T2G_PI_BIN / --model")
+            return
+        self.progress_label.setText("Teste Backend…")
+        FreeCADGui.updateGui()
+        try:
+            _c._t2g_api_call(cfg, "You are a helpful assistant.",
+                             "Reply with exactly the two letters: OK")
+            self.api_test_result("Backend-Test erfolgreich")
+        except Exception as e:  # noqa: BLE001
+            self.api_test_result(f"Backend-Test fehlgeschlagen: {e}")
+
+    def api_test_result(self, msg: str) -> None:
+        self.progress_label.setText(msg)
+        FreeCAD.Console.PrintMessage("TextToGeometry: " + msg + "\n")
+
     # ---------------------------------------------------------------- data --
 
     def _csv_pick(self) -> None:
@@ -395,6 +749,22 @@ class T2GDialog(QDialog):
             self, "XLSX öffnen", os.path.expanduser("~"), "Excel (*.xlsx)")
         if path:
             self.xlsx_path.setText(path)
+
+    def _dwg_pick(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Zeichnung öffnen", os.path.expanduser("~"),
+            "SVG (*.svg);;Zeichnungen (bridge.svg)")
+        if path:
+            self.dwg_path.setText(path)
+            self._dwg_load_spec()
+
+    def _dwg_load_spec(self) -> None:
+        path = self.dwg_path.text().strip()
+        if not path:
+            return
+        spec = T2GCore.load_drawing_spec(path)
+        self.dwg_spec_edit.setPlainText(spec)
+        self.log_edit.appendPlainText(f"Zeichnung geladen: {path}")
 
     def _out_pick(self) -> None:
         default = self.csv_out_path.text().strip() or os.path.join(
@@ -428,8 +798,8 @@ class T2GDialog(QDialog):
             hdr, rows = T2GCore.read_table_ssheet(obj)
         elif self.src_paste_rb.isChecked():
             hdr, rows = T2GCore.read_table_paste(self.paste_edit.toPlainText())
-        else:  # prompt
-            if not self.prompt_edit.toPlainText().strip():
+        else:  # prompt or drawing: single variant, no table
+            if not self.src_dwg_rb.isChecked() and not self.prompt_edit.toPlainText().strip():
                 raise T2GCore.T2GError("Bitte zuerst einen Freitext-Prompt eingeben.")
             return [{}]
         if not rows:
@@ -472,9 +842,17 @@ class T2GDialog(QDialog):
             density = self._collect_density()
             feedback = self.feedback_check.isChecked()
             max_itr = max(1, self.max_iters_spin.value()) if feedback else 1
-            base_prompt = self.prompt_edit.toPlainText().strip() or (
-                "Baue die beschriebene Geometrie; nutze die Varianten-Werte "
-                "und erfülle die angegeben Zielen.")
+            if self.src_dwg_rb.isChecked():
+                spec = self.dwg_spec_edit.toPlainText().strip()
+                if not spec:
+                    raise T2GCore.T2GError(
+                        "Bitte zuerst die SVG-Zeichnung laden (Zeichnung lädt die "
+                        "<desc>-Spezifikation).")
+                base_prompt = T2GCore.build_drawing_prompt(spec)
+            else:
+                base_prompt = self.prompt_edit.toPlainText().strip() or (
+                    "Baue die beschriebene Geometrie; nutze die Varianten-Werte "
+                    "und erfülle die angegebenen Zielen.")
             cfg = T2GCore.SweepConfig(
                 base_prompt=base_prompt,
                 rows=rows,
@@ -499,12 +877,19 @@ class T2GDialog(QDialog):
         self._worker.start()
 
     def _make_gen_fn(self):
-        pi = T2GCore.find_pi_binary()
+        kind = getattr(self, "_current_api_kind", "pi")
+        api_cfg = (self._api_config()
+                   if hasattr(self, "api_kind") and kind in ("openai", "ollama")
+                   else None)
+        pi = None if api_cfg is not None else T2GCore.find_pi_binary()
 
         def _gen(prompt: str) -> "tuple[str, object]":
-            raw = T2GCore.run_backend(prompt, pi_binary=pi)
-            code = T2GCore.extract_code_block(raw)
-            shapes = T2GCore.exec_code_in_sandbox(code)
+            if api_cfg is not None:
+                code, shapes = T2GCore.generate_via_api(prompt, cfg=api_cfg)
+            else:
+                raw = T2GCore.run_backend(prompt, pi_binary=pi)
+                code = T2GCore.extract_code_block(raw)
+                shapes = T2GCore.exec_code_in_sandbox(code)
             return code, shapes
 
         return _gen

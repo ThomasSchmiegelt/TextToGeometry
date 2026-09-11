@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="-60 -30 2120 1240">
+  <desc>
+2D front elevation of a truss bridge, to be extruded into 3D.
+CONVENTIONS
+- All dimensions in millimetres (mm).
+- Drawing plane = front elevation: horizontal = X, vertical in the picture = physical H (height).
+- SVG coordinate mapping: svg_x = X, svg_y = 1180 - H  (i.e. physical height H, ground at H=0, picture top = H=1180).
+- Extrusion depth along Y (into the page) = 400 mm; each element is a box from H_lo to H_hi.
+ELEMENTS (X from..to, H from..to, thickness in Y)
+  piars      x 175..325 and x 1675..1825, H 0..400,   depth 150
+  deck       x 0..2000, H 400..500, depth 400
+  verticals  x-centres 250, 625, 1000, 1375, 1750; width 80 (x), H 500..1100, depth 80
+  top_chord  x 250..1750, H 1100..1180, depth 80
+  diagonals  square bar section 60x60, centred on segments:
+             (625, 500) -> (250, 1100)
+             (625, 1100) -> (1000, 500)
+             (1000, 500) -> (1375, 1100)
+             (1375, 1100) -> (1750, 500)
+  (diagonal endpoints are x-centres at the deck/top-chord levels)
+TOTAL: X span 0..2000, H 0..1180, Y 0..400
+  </desc>
+  <rect width="1200" height="790" fill="#ffffff"/>
+  <!-- Piars: H 0..400 -> svg_y 780..1180 -->
+  <rect x="175"  y="780" width="150" height="400" fill="#b0b0b0" stroke="#333" stroke-width="2"/>
+  <rect x="1675" y="780" width="150" height="400" fill="#b0b0b0" stroke="#333" stroke-width="2"/>
+  <!-- Deck: H 400..500 -> svg_y 680..780 -->
+  <rect x="0" y="680" width="2000" height="100" fill="#d0d0d0" stroke="#333" stroke-width="2"/>
+  <!-- Verticals: H 500..1100 -> svg_y 80..680, centred at 250/625/1000/1375/1750 -->
+  <rect x="210"  y="80" width="80" height="600" fill="#a0a0a0" stroke="#333" stroke-width="1.5"/>
+  <rect x="585"  y="80" width="80" height="600" fill="#a0a0a0" stroke="#333" stroke-width="1.5"/>
+  <rect x="960"  y="80" width="80" height="600" fill="#a0a0a0" stroke="#333" stroke-width="1.5"/>
+  <rect x="1335" y="80" width="80" height="600" fill="#a0a0a0" stroke="#333" stroke-width="1.5"/>
+  <rect x="1710" y="80" width="80" height="600" fill="#a0a0a0" stroke="#333" stroke-width="1.5"/>
+  <!-- Top chord: H 1100..1180 -> svg_y 0..80 -->
+  <rect x="250" y="0" width="1500" height="80" fill="#909090" stroke="#333" stroke-width="2"/>
+  <!-- Diagonals: (x, H) -> (svg_x, 1180-H), stroke 60 -->
+  <line x1="625"  y1="680" x2="250"  y2="80"  stroke="#606060" stroke-width="60"/>
+  <line x1="625"  y1="80"  x2="1000" y2="680" stroke="#606060" stroke-width="60"/>
+  <line x1="1000" y1="680" x2="1375" y2="80"  stroke="#606060" stroke-width="60"/>
+  <line x1="1375" y1="80"  x2="1750" y2="680" stroke="#606060" stroke-width="60"/>
+</svg>
