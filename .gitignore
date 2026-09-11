@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Test / runtime artifacts
+sweep_results.csv
+t2g_ergebnisse.csv
+sweep_result.txt
+gui_selftest.txt
+*.log
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
