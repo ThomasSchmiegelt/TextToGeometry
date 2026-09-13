@@ -10,7 +10,8 @@ Two variants, one measurable volume target both should satisfy.
 import os
 import sys
 
-_HERE = "/home/cae/.local/share/FreeCAD/v1-1/Mod/TextToGeometry"
+_HERE = (os.path.dirname(os.path.abspath(__file__))
+         if "__file__" in globals() else os.getcwd())
 if os.path.isdir(_HERE):
     sys.path.insert(0, _HERE)
 

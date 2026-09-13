@@ -11,6 +11,10 @@ MODE="${1:-gui}"
 
 DEV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# --- Helfer ---------------------------------------------------------------
+say() { printf '\033[1;36m[TextToGeometry]\033[0m %s\n' "$*"; }
+fail() { printf '\033[1;31m[TextToGeometry] FEHLER:\033[0m %s\n' "$*" >&2; exit 1; }
+
 # --- Pfade ----------------------------------------------------------------
 FREECAD="${FREECAD:-$HOME/freecad_1.1_quellcode/build/release/bin/FreeCAD}"
 FREECAD_CMD="${FREECAD_CMD:-$HOME/freecad_1.1_quellcode/build/release/bin/FreeCADCmd}"
@@ -27,53 +31,57 @@ else
     say "Achtung: v${fc_ver}-Mod-Verzeichnis fehlt, nutze $MOD_DIR"
 fi
 
-# --- Helfer ---------------------------------------------------------------
-say() { printf '\033[1;36m[TextToGeometry]\033[0m %s\n' "$*"; }
-fail() { printf '\033[1;31m[TextToGeometry] FEHLER:\033[0m %s\n' "$*" >&2; exit 1; }
+ollama_up() {
+    command -v curl >/dev/null 2>&1 || return 0   # ohne curl nicht pruefbar
+    curl -fsS -o /dev/null --max-time 2 "http://localhost:11434/api/tags"
+}
+
+# Ollama ist das Standard-Backend der Workbench -> hier starten, nicht nur melden.
+ensure_ollama() {
+    if ollama_up; then
+        say "Ollama laeuft (localhost:11434)"
+        return 0
+    fi
+    say "Ollama antwortet nicht – versuche zu starten …"
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl --user start ollama >/dev/null 2>&1 || \
+            systemctl start ollama >/dev/null 2>&1 || true
+    fi
+    if ! ollama_up && command -v ollama >/dev/null 2>&1; then
+        setsid ollama serve >/dev/null 2>&1 &
+    fi
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        if ollama_up; then
+            say "Ollama gestartet (localhost:11434)"
+            return 0
+        fi
+        sleep 1
+    done
+    say "Ollama konnte nicht gestartet werden – im Panel unter „Backend“ erneut versuchen."
+    return 1
+}
 
 check_prereqs() {
     local missing=0
     [ -x "$FREECAD" ]     || { say "FreeCAD fehlt: $FREECAD"; missing=1; }
     [ -x "$FREECAD_CMD" ] || { say "FreeCADCmd fehlt: $FREECAD_CMD"; missing=1; }
-    [ -x "$PI_BIN" ]      || { say "pi-CLI fehlt: $PI_BIN (optional, T2G_PI_BIN setzen)"; missing=1; }
-    if command -v curl >/dev/null 2>&1; then
-        if ! curl -fsS -o /dev/null --max-time 2 "http://localhost:11434/api/tags"; then
-            say "Ollama läuft nicht auf localhost:11434 (optional, für HTTP-Backend)"
-            missing=1
-        fi
-    fi
+    [ -x "$PI_BIN" ]      || say "pi-CLI fehlt: $PI_BIN (optional – Standard-Backend ist Ollama)"
+    ensure_ollama || missing=1
     [ "$missing" = 0 ] || say "Einige optionale Abhängigkeiten fehlen — GUI startet trotzdem, falls FreeCAD da ist."
     [ -x "$FREECAD" ] || fail "FreeCAD-Binary nicht gefunden: $FREECAD"
 }
 
 sync_src() {
     say "Synchronisiere $DEV_DIR -> $MOD_DIR"
-    mkdir -p "$MOD_DIR"
-    cp -v \
-        "$DEV_DIR"/__init__.py \
-        "$DEV_DIR"/Init.py \
-        "$DEV_DIR"/InitGui.py \
-        "$DEV_DIR"/T2GCore.py \
-        "$DEV_DIR"/T2GCommand.py \
-        "$DEV_DIR"/T2GSkills.py \
-        "$DEV_DIR"/package.xml \
-        "$DEV_DIR"/CMakeLists.txt \
-        "$DEV_DIR"/README.md \
-        "$DEV_DIR"/DOKUMENTATION.md \
-        "$DEV_DIR"/test_core.py \
-        "$DEV_DIR"/test_ext.py \
-        "$DEV_DIR"/test_skills.py \
-        "$MOD_DIR"/
-    cp -rv "$DEV_DIR"/Resources "$MOD_DIR"/ >/dev/null
-    cp -rv "$DEV_DIR"/Skills    "$MOD_DIR"/ >/dev/null
-    find "$MOD_DIR" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
-    say "Sync fertig."
+    # eine Dateiliste, gepflegt in install.py
+    python3 "$DEV_DIR/install.py" --target "$(dirname "$MOD_DIR")" || \
+        fail "Installation fehlgeschlagen"
 }
 
 run_tests() {
     [ -x "$FREECAD_CMD" ] || fail "FreeCADCmd nicht gefunden: $FREECAD_CMD"
     local rc_all=0
-    for t in test_core.py test_ext.py test_skills.py; do
+    for t in test_core.py test_ext.py test_skills.py test_chat.py test_learn.py test_project.py test_agent.py test_tools.py; do
         say "Starte $t …"
         if ( cd "$DEV_DIR" && "$FREECAD_CMD" "$t"; ); then
             say "  ✔ $t PASS"

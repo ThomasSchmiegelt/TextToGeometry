@@ -7,7 +7,8 @@ Pipeline exactly as the dialog does it:
 import os
 import sys
 
-_here = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else "/home/cae/.local/share/FreeCAD/Mod/TextToGeometry"
+_here = (os.path.dirname(os.path.abspath(__file__))
+         if "__file__" in globals() else os.getcwd())
 if _here and os.path.isdir(_here):
     sys.path.insert(0, _here)
 

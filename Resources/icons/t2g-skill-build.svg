@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>Skill bauen</title>
+  <rect x="1" y="1" width="30" height="30" rx="5" fill="#17402c" stroke="#0b2418" stroke-width="1"/>
+  <!-- truss / bridge = deterministic parametric geometry -->
+  <path d="M3 22 h26" stroke="#6ee7a8" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+  <path d="M5 22 L9 12 L16 22 L23 12 L27 22" stroke="#6ee7a8" stroke-width="2"
+        fill="none" stroke-linejoin="round"/>
+  <path d="M9 12 h14" stroke="#2f9e68" stroke-width="2" stroke-linecap="round"/>
+  <!-- piers -->
+  <rect x="4" y="22" width="3" height="6" fill="#2f9e68"/>
+  <rect x="25" y="22" width="3" height="6" fill="#2f9e68"/>
+  <!-- parameter dots -->
+  <circle cx="9" cy="12" r="1.9" fill="#ffd23f"/>
+  <circle cx="23" cy="12" r="1.9" fill="#ffd23f"/>
+</svg>

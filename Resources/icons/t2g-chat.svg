@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>Dialog</title>
+  <rect x="1" y="1" width="30" height="30" rx="5" fill="#123049" stroke="#08192b" stroke-width="1"/>
+  <!-- speech bubble -->
+  <path d="M4 6 h18 a2.5 2.5 0 0 1 2.5 2.5 v8 a2.5 2.5 0 0 1 -2.5 2.5 h-9 l-5.5 4.5 v-4.5 h-3.5
+           a2.5 2.5 0 0 1 -2.5 -2.5 v-8 a2.5 2.5 0 0 1 2.5 -2.5 z" fill="#7ec8ff"/>
+  <rect x="6.5" y="9.5" width="13" height="1.8" rx="0.9" fill="#123049"/>
+  <rect x="6.5" y="13.5" width="9" height="1.8" rx="0.9" fill="#123049"/>
+  <!-- the part being changed: cube with a hole -->
+  <polygon points="20,20 25,17.5 30,20 25,22.5" fill="#ffd23f"/>
+  <polygon points="20,20 25,22.5 25,28 20,25.5" fill="#d9a900"/>
+  <polygon points="25,22.5 30,20 30,25.5 25,28" fill="#a37f00"/>
+  <ellipse cx="25" cy="20" rx="1.9" ry="1" fill="#123049"/>
+</svg>

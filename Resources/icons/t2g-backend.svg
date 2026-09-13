@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>Backend testen</title>
+  <rect x="1" y="1" width="30" height="30" rx="5" fill="#5f2a1e" stroke="#38150f" stroke-width="1"/>
+  <!-- server stack = local LLM backend -->
+  <rect x="5" y="5" width="22" height="6.5" rx="1.6" fill="#ffb08a"/>
+  <rect x="5" y="13" width="22" height="6.5" rx="1.6" fill="#ff8f5e"/>
+  <circle cx="8.5" cy="8.25" r="1.5" fill="#5f2a1e"/>
+  <circle cx="8.5" cy="16.25" r="1.5" fill="#5f2a1e"/>
+  <rect x="12" y="7.4" width="11" height="1.7" rx="0.85" fill="#5f2a1e" opacity="0.5"/>
+  <rect x="12" y="15.4" width="11" height="1.7" rx="0.85" fill="#5f2a1e" opacity="0.5"/>
+  <!-- connection check -->
+  <circle cx="22" cy="24" r="7" fill="#17402c"/>
+  <path d="M18.5 24 L21 26.5 L25.5 21" fill="none" stroke="#6ee7a8"
+        stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -14,7 +14,7 @@ _here = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() el
 if _here and os.path.isdir(_here):
     sys.path.insert(0, _here)
 
-HERE = "/home/cae/t2g/TextToGeometry"
+HERE = _here or os.getcwd()
 SVG = os.path.join(HERE, "Resources/drawings/bridge.svg")
 OUT = os.environ.get("T2G_OUT", "/tmp/opencode/t2g_bridge_out.txt")
 

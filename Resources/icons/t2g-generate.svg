@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>Generieren (LLM)</title>
+  <rect x="1" y="1" width="30" height="30" rx="5" fill="#1e3a5f" stroke="#0f2438" stroke-width="1"/>
+  <!-- big "T" = text, left -->
+  <path d="M4 7 h11 v3 h-4 v13 h-3 v-13 h-4 z" fill="#ffd23f"/>
+  <!-- arrow -->
+  <path d="M15.5 15 h4 M18 12.5 L21 15 L18 17.5" fill="none" stroke="#ffffff"
+        stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- isometric cube, right -->
+  <polygon points="21,13 26,10.5 31,13 26,15.5" fill="#7ec8ff"/>
+  <polygon points="21,13 26,15.5 26,21.5 21,19" fill="#4a9fdc"/>
+  <polygon points="26,15.5 31,13 31,19 26,21.5" fill="#2b6cb0"/>
+</svg>

@@ -153,7 +153,9 @@ _SKILL_BUILTINS = {
 }
 
 
-_ALLOWED_IMPORTS = ("math",)
+#: Modules a skill may import. Part/FreeCAD are what the geometry needs;
+#: everything else (os, subprocess, socket, ...) is refused.
+_ALLOWED_IMPORTS = ("math", "Part", "FreeCAD")
 
 
 def _safe_import(name, *a, **k):
@@ -163,13 +165,16 @@ def _safe_import(name, *a, **k):
 
 
 def _skill_namespace() -> dict:
+    # `import x` resolves __import__ through __builtins__, never through the
+    # globals dict -- so the guard has to live in __builtins__ to have any
+    # effect at all.
+    guarded_builtins = dict(_SKILL_BUILTINS)
+    guarded_builtins["__import__"] = _safe_import
     ns = dict(_SKILL_BUILTINS)
+    ns["__builtins__"] = guarded_builtins
+    ns["__import__"] = _safe_import
     try:
-        ns["__import__"] = _safe_import
-    except Exception:
-        pass
-    try:
-        ns["math"] = ns["__import__"]("math")
+        ns["math"] = _py_builtins.__import__("math")
     except Exception:
         pass
     for name in ("Part", "FreeCAD"):
@@ -440,6 +445,93 @@ def get_engine(skills_dir: str | None = None) -> SkillEngine:
 
 
 # ---------------------------------------------------------------------------
+# Validating a generated skill before it is written to disk
+# ---------------------------------------------------------------------------
+
+def validate_skill_source(name: str, params: list, build_code: str,
+                          pruefregeln: list | None = None,
+                          run_build: bool = True) -> tuple:
+    """Check a generated skill without saving it.
+
+    Returns ``(problems, shapes)``: ``problems`` is empty when the skill
+    compiled, ran with its default parameters and produced solids. Used by the
+    learn-a-skill loop to feed real errors back to the model.
+    """
+    problems: list = []
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name or ""):
+        problems.append(f"Ungültiger Skill-Name: {name!r}")
+    if "def build(" not in (build_code or ""):
+        problems.append("Der Code enthält keine Funktion `def build(params):`.")
+        return problems, []
+    try:
+        norm = [p if isinstance(p, SkillParam) else _param_from_tuple(p)
+                for p in (params or [])]
+    except Exception as e:  # noqa: BLE001
+        problems.append(f"Parameterliste fehlerhaft: {e}")
+        return problems, []
+    if not norm:
+        problems.append("Kein einziger Parameter definiert.")
+        return problems, []
+    for p in norm:
+        if p.min is not None and p.max is not None and p.min > p.max:
+            problems.append(f"Parameter {p.name}: min > max")
+
+    ns = _skill_namespace()
+    try:
+        code = compile(build_code, "<gelernter-skill>", "exec")
+        exec(code, ns)
+    except SyntaxError as e:
+        problems.append(f"Syntaxfehler: {e}")
+        return problems, []
+    except Exception as e:  # noqa: BLE001
+        problems.append(f"Code ließ sich nicht laden: {type(e).__name__}: {e}")
+        return problems, []
+
+    build = ns.get("build")
+    if not callable(build):
+        problems.append("`build` ist keine Funktion.")
+        return problems, []
+
+    definition = SkillDefinition(
+        name=name or "skill", description="", params=norm,
+        dependencies=["Part"], pruefregeln=list(pruefregeln or []))
+
+    if not run_build:
+        return problems, []
+
+    # Unused parameters are a strong hint the geometry ignores the inputs.
+    used = [p.name for p in norm if p.name in build_code]
+    missing = [p.name for p in norm if p.name not in used]
+    if missing:
+        problems.append("Diese Parameter kommen im Code nicht vor: "
+                        + ", ".join(missing))
+
+    try:
+        values = validate_params(definition, {})
+        shapes = build(values)
+    except Exception as e:  # noqa: BLE001
+        problems.append(f"build() mit Standardwerten scheiterte: "
+                        f"{type(e).__name__}: {e}")
+        return problems, []
+
+    if not isinstance(shapes, (list, tuple)):
+        shapes = [shapes]
+    shapes = [s for s in shapes if s is not None]
+    if not shapes:
+        problems.append("build() lieferte keine Solids zurück.")
+        return problems, []
+    for i, shp in enumerate(shapes):
+        vol = getattr(shp, "Volume", None)
+        if vol is not None and vol <= 0:
+            problems.append(f"Solid {i + 1} hat kein positives Volumen ({vol}).")
+    try:
+        problems.extend(apply_rules(definition, list(shapes)))
+    except Exception as e:  # noqa: BLE001
+        problems.append(f"Prüfregeln fehlgeschlagen: {e}")
+    return problems, list(shapes)
+
+
+# ---------------------------------------------------------------------------
 # Skill creator (writes a new skill module)
 # ---------------------------------------------------------------------------
 
@@ -500,9 +592,64 @@ def create_skill(name: str, description: str, params: list,
     return path
 
 
+def skill_path(name: str, out_dir: str | None = None) -> str:
+    """Where a skill's module lives (whether or not it exists yet)."""
+    base = out_dir or _default_skills_dir_static()
+    return os.path.join(base, name, name + ".py")
+
+
+def build_source(skill: "LoadedSkill | str") -> str:
+    """Just the build() part of a skill module -- what a refinement rewrites."""
+    src = skill if isinstance(skill, str) else skill.source
+    i = src.find("def build(")
+    return src[i:].strip() if i >= 0 else src.strip()
+
+
+def backup_skill(name: str, out_dir: str | None = None) -> "str | None":
+    """Copy a skill aside before it is overwritten; returns the backup path."""
+    path = skill_path(name, out_dir)
+    if not os.path.isfile(path):
+        return None
+    import time
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    dest = os.path.join(os.path.dirname(path), f"{name}.{stamp}.py.bak")
+    shutil_ = __import__("shutil")
+    shutil_.copyfile(path, dest)
+    return dest
+
+
+def update_skill(name: str, description: str, params: list, build_code: str,
+                 pruefregeln: list = ("kollision", "konnektivitaet"),
+                 out_dir: str | None = None) -> tuple:
+    """Replace an existing skill, keeping the previous version as a backup.
+
+    Returns ``(path, backup_path_or_None)``.
+    """
+    backup = backup_skill(name, out_dir)
+    try:
+        path = create_skill(name, description, params, build_code,
+                            pruefregeln=pruefregeln, out_dir=out_dir)
+    except Exception:
+        if backup:  # put the old one back rather than leaving a hole
+            shutil_ = __import__("shutil")
+            shutil_.copyfile(backup, skill_path(name, out_dir))
+        raise
+    return path, backup
+
+
 def _default_skills_dir_static() -> str:
     return os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "Skills")
+
+
+def list_backups(name: str, out_dir: str | None = None) -> list:
+    """Previous versions of a skill, newest first."""
+    d = os.path.dirname(skill_path(name, out_dir))
+    if not os.path.isdir(d):
+        return []
+    return sorted((os.path.join(d, f) for f in os.listdir(d)
+                   if f.startswith(name + ".") and f.endswith(".py.bak")),
+                  reverse=True)
 
 
 def delete_skill(name: str, out_dir: str | None = None) -> bool:

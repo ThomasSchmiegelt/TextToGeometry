@@ -14,3 +14,10 @@ gui_selftest.txt
 .DS_Store
 .idea/
 .vscode/
+
+# Verteilpaket (mit install.py --paket erzeugt)
+TextToGeometry*.zip
+
+# FreeCAD-Dokumente aus Testlaeufen
+*.FCStd
+*.FCStd1

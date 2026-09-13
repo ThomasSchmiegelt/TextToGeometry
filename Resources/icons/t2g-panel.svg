@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>T2G-Panel</title>
+  <rect x="2" y="4" width="28" height="24" rx="3" fill="#1e3a5f" stroke="#0f2438" stroke-width="1"/>
+  <!-- main area -->
+  <rect x="4" y="9" width="14" height="17" rx="1.5" fill="#123049"/>
+  <!-- docked side panel (the point of this command) -->
+  <rect x="19.5" y="9" width="8.5" height="17" rx="1.5" fill="#7ec8ff"/>
+  <rect x="21" y="11.5" width="5.5" height="1.8" rx="0.9" fill="#1e3a5f"/>
+  <rect x="21" y="15" width="5.5" height="1.8" rx="0.9" fill="#1e3a5f"/>
+  <rect x="21" y="18.5" width="5.5" height="1.8" rx="0.9" fill="#1e3a5f"/>
+  <!-- title bar -->
+  <rect x="4" y="6" width="24" height="2" rx="1" fill="#4a9fdc"/>
+</svg>

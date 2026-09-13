@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no" ?>
 <package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
     <name>TextToGeometry</name>
-    <description>Natural-language text to 3D geometry, powered by the local Ollama model and the pi CLI harness.</description>
+    <description>Konstruktionsagent für FreeCAD: Chat-Dialog am offenen Dokument, Projekte mit gewichteten Kriterien und Abhängigkeitsgraph, lernbare parametrische Skills, Werkzeuge, Festigkeitsanalyse. Läuft lokal über Ollama oder über einen OpenAI-kompatiblen API-Zugang.</description>
     <icon>Resources/icons/text-to-geometry.svg</icon>
-    <version>0.1.0</version>
-    <date>2026-09-11</date>
+    <version>0.3.0</version>
+    <date>2026-09-13</date>
     <maintainer email="cae@example.invalid">cae</maintainer>
     <license file="Resources/licenses/LGPL-2.1-or-later.txt">LGPL-2.1-or-later</license>
     <url type="repository" branch="main">https://example.invalid/TextToGeometry</url>

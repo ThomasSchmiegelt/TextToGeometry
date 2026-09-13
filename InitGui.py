@@ -33,14 +33,51 @@ class T2GWorkbench(Workbench):
             pass
 
     def Initialize(self):
-        self.appendToolbar("T2G", ["T2G_Generate"])
-        self.appendMenu(["TextToGeometry"], ["T2G_Generate"])
+        # Grouped by what they do: panel | LLM | skills | backend.
+        self.appendToolbar("T2G", [
+            "T2G_Panel",
+            "Separator",
+            "T2G_Project",
+            "T2G_Chat",
+            "T2G_Generate",
+            "Separator",
+            "T2G_SkillBuild",
+            "T2G_SkillLearn",
+            "T2G_SkillDesign",
+            "Separator",
+            "T2G_ApiTest",
+        ])
+        self.appendMenu(["TextToGeometry"], [
+            "T2G_Panel",
+            "Separator",
+            "T2G_Project",
+            "T2G_Chat",
+            "T2G_Generate",
+            "Separator",
+            "T2G_SkillBuild",
+            "T2G_SkillLearn",
+            "T2G_SkillDesign",
+            "Separator",
+            "T2G_ApiTest",
+        ])
 
     def GetClassName(self):
         return "Gui::PythonWorkbench"
 
     def Activated(self):
         FreeCAD.Console.PrintMessage("TextToGeometry workbench activated\n")
+        # The toolbar exists only after FreeCAD has built it, and it is rebuilt
+        # on every workbench switch -- so ask again each time, deferred.
+        try:
+            from PySide6 import QtCore
+
+            import T2GCommand as _t2g
+            QtCore.QTimer.singleShot(0, _t2g.ensure_toolbar_input)
+            QtCore.QTimer.singleShot(600, _t2g.ensure_toolbar_input)
+        except Exception as e:  # noqa: BLE001
+            FreeCAD.Console.PrintWarning(
+                "TextToGeometry: Eingabefeld in der Leiste nicht moeglich: "
+                "%s\n" % e)
 
     def Deactivated(self):
         FreeCAD.Console.PrintMessage("TextToGeometry workbench deactivated\n")
