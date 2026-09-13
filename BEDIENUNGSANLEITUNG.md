@@ -142,8 +142,23 @@ Parameter, gleiches Ergebnis, ohne Modell.
 ### Alle fehlenden Bauteile auf einmal
 
 Tab **Projekt** → *Skills des Projekts* → **Alle fehlenden lernen**. Die Skills
-werden nacheinander abgearbeitet; scheitert einer, geht es mit dem nächsten
-weiter. Jeder dauert einige Minuten.
+werden nacheinander und ohne weiteres Zutun abgearbeitet. Im Tab **Lernen**
+läuft dazu ein Fortschrittsbalken:
+
+```
+2 von 5 · ventilfuehrung · Versuch 1/3
+```
+
+Er nennt den Stand, das laufende Bauteil und dessen Phase (Analyse, Versuch
+x/3, gelernt, gescheitert). Am Ende steht eine Bilanz: *„Warteschlange
+abgearbeitet: 4 gelernt (…) · gescheitert: brennraum"*.
+
+Scheitert ein Skill, wird er übersprungen und der Grund ins Protokoll
+geschrieben — die Schlange bleibt nie stehen. Kommt ein Schritt 20 Minuten lang
+nicht voran, bricht die Workbench ihn ab und macht weiter.
+
+Eine einfache Scheibe braucht so gut zwei Minuten, ein Kanal mit Bogen eher
+vier.
 
 ### Einen vorhandenen Skill verbessern
 
@@ -227,6 +242,32 @@ herunterdrehen.
 *Denken zeigen* blendet die Überlegungen des Modells in den Verlauf ein; im
 Protokoll unten stehen sie ohnehin immer.
 
+### Sie sehen dem Modell beim Arbeiten zu
+
+Bei **Ollama** und **API** läuft die Antwort gestreamt: In der Statuszeile
+erscheint mitlaufend, was gerade entsteht — erst „denkt: …", dann
+„schreibt: …". Das erste Zeichen kommt typischerweise nach ein bis zwei
+Sekunden.
+
+Bleibt es acht Sekunden still, prüft die Workbench nach, ob Ollama das Modell
+überhaupt geladen hat, und meldet: *„Modell wird erst in den Speicher geladen —
+das dauert beim ersten Mal ein bis drei Minuten."* Ein kalter Start eines
+27B-Modells kostet echte Minuten; danach ist es schnell.
+
+### Warum Sie pi meiden sollten
+
+Auf diesem Rechner gemessen, gleicher Prompt, gleiches Modell:
+
+| Backend | Dauer | Zwischenausgabe |
+|---------|------:|-----------------|
+| Ollama (nativ) | **14 s** | ab 0,6 s sichtbar |
+| pi-CLI | **über 300 s** | keine |
+
+pi startet zusätzlich Node und gibt erst am Ende Text aus — dadurch wirkt die
+Workbench eingefroren, obwohl sie arbeitet. Ist Ollama direkt erreichbar, warnt
+der Backend-Status entsprechend. pi ist nur sinnvoll, wenn Sie dessen Provider
+oder Anmeldung brauchen.
+
 ---
 
 ## 7. Wenn etwas klemmt
@@ -241,6 +282,8 @@ Protokoll unten stehen sie ohnehin immer.
 | „Disallowed import" | Der erzeugte Code wollte ein nicht erlaubtes Modul benutzen. Erlaubt sind `Part`, `FreeCAD`, `math`. |
 | „Solver CalculiX ist nicht installiert" | `sudo apt install calculix-ccx` — Aufbau und Netz stehen trotzdem. |
 | Nichts passiert beim Klick | Steht die Gruppe außerhalb des Sichtbereichs? Die Befehle scrollen sie inzwischen heran. |
+| Lange Stille, keine Ausgabe | Backend prüfen: Bei pi kommt Text erst am Ende. Bei Ollama sagt die Statuszeile nach acht Sekunden, ob das Modell gerade geladen wird. |
+| Warteschlange scheint zu hängen | Der Balken nennt die Phase. Passiert 20 Minuten nichts, wird der Schritt abgebrochen und übersprungen. |
 
 **Stop** im Dialog hält nach dem laufenden Schritt an. Ein laufender
 Modellaufruf lässt sich nicht mitten in der Antwort abbrechen — FreeCAD bleibt

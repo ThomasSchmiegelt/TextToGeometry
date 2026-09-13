@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
+    QProgressBar,
     QLineEdit,
     QPushButton,
     QListWidget,
@@ -128,10 +129,26 @@ class _ChatWorker(QtCore.QThread):
         self._cfg = cfg
         self._pi = pi_binary
 
+    progress = QtCore.Signal(object)
+
     def run(self) -> None:
+        gesamt = {"text": "", "thinking": ""}
+        letzte = [0.0]
+
+        def _stueck(text: str, denken: str) -> None:
+            gesamt["text"] += text
+            gesamt["thinking"] += denken
+            jetzt = __import__("time").time()
+            if jetzt - letzte[0] < 0.25:
+                return
+            letzte[0] = jetzt
+            self.progress.emit({"text": gesamt["text"],
+                                "thinking": gesamt["thinking"], "tag": "chat"})
+
         try:
             raw, thinking = T2GCore.call_model_verbose(
-                self._prompt, T2GCore.CHAT_SYSTEM_PROMPT, self._cfg, self._pi)
+                self._prompt, T2GCore.CHAT_SYSTEM_PROMPT, self._cfg, self._pi,
+                on_progress=_stueck)
             reply = T2GCore.parse_chat_reply(raw)
             self.done.emit({"kind": reply.kind, "text": reply.text,
                             "thinking": thinking, "error": None, "raw": raw})
@@ -140,9 +157,14 @@ class _ChatWorker(QtCore.QThread):
 
 
 class _TextWorker(QtCore.QThread):
-    """Any single LLM call off the GUI thread; emits the raw answer."""
+    """Any single LLM call off the GUI thread; emits the raw answer.
 
-    done = QtCore.Signal(object)  # dict {text, error, tag}
+    Reports progress while the answer streams in -- without it the panel shows
+    nothing for minutes and the user cannot tell work from a hang.
+    """
+
+    done = QtCore.Signal(object)     # dict {text, error, tag}
+    progress = QtCore.Signal(object)  # dict {text, thinking, tag}
 
     def __init__(self, prompt: str, system_prompt: str, cfg, pi_binary,
                  tag: str = "", parent=None) -> None:
@@ -154,9 +176,24 @@ class _TextWorker(QtCore.QThread):
         self._tag = tag
 
     def run(self) -> None:
+        gesamt = {"text": "", "thinking": ""}
+        letzte = [0.0]
+
+        def _stueck(text: str, denken: str) -> None:
+            gesamt["text"] += text
+            gesamt["thinking"] += denken
+            jetzt = __import__("time").time()
+            if jetzt - letzte[0] < 0.25:      # nicht öfter als viermal je Sekunde
+                return
+            letzte[0] = jetzt
+            self.progress.emit({"text": gesamt["text"],
+                                "thinking": gesamt["thinking"],
+                                "tag": self._tag})
+
         try:
             raw, thinking = T2GCore.call_model_verbose(
-                self._prompt, self._system, self._cfg, self._pi)
+                self._prompt, self._system, self._cfg, self._pi,
+                on_progress=_stueck)
             self.done.emit({"text": raw, "thinking": thinking,
                             "error": None, "tag": self._tag})
         except Exception as e:  # noqa: BLE001
@@ -1184,8 +1221,17 @@ class T2GPanel(QWidget):
             if cfg.kind == "pi":
                 if not pi:
                     return "pi-CLI nicht gefunden."
-                return "pi-CLI: %s · Provider %s · Modell %s" % (
-                    pi, cfg.provider or "ollama", cfg.model or "–")
+                text = ("pi-CLI: %s · Provider %s · Modell %s"
+                        % (pi, cfg.provider or "ollama", cfg.model or "–"))
+                if (cfg.provider or "ollama") == "ollama" \
+                        and T2GCore.ollama_running():
+                    # measured here: 14 s direct versus over 300 s through pi,
+                    # and pi shows nothing until it is done
+                    text += ("  ⚠ Ollama ist direkt erreichbar und deutlich "
+                             "schneller – pi startet zusätzlich Node und "
+                             "liefert erst am Ende Text. Empfehlung: Backend "
+                             "„Ollama (nativ)“.")
+                return text
             return T2GCore.backend_status(cfg)
 
         self.api_status.setText("Prüfe Backend …")
@@ -1474,7 +1520,7 @@ class T2GPanel(QWidget):
                 raise T2GCore.BackendError(
                     "Kein Modell gewählt (Tab „Backend“ → Modelle laden).")
 
-        gen_cfg = T2GCore.with_thinking(api_cfg, "high")
+        gen_cfg = T2GCore.with_thinking(api_cfg, self._code_thinking(api_cfg))
 
         def _gen(prompt: str) -> "tuple[str, object]":
             if gen_cfg is not None and gen_cfg.kind in ("openai", "ollama"):
@@ -1675,7 +1721,44 @@ class T2GPanel(QWidget):
         self.chat_view.clear()
         self.progress_label.setText("Dialogverlauf zurückgesetzt.")
 
+    def _on_stream(self, payload: dict) -> None:
+        """Show what is coming in, so the wait is visible as work."""
+        text = (payload.get("text") or "").strip()
+        denken = (payload.get("thinking") or "").strip()
+        zeichen = len(text) + len(denken)
+        aktuell = text or denken
+        schwanz = " ".join(aktuell.split())[-90:]
+        art = "schreibt" if text else "denkt"
+        self._stream_info = "%s · %d Zeichen" % (art, zeichen)
+        self._elapsed_setter(
+            "%s (%d s) · %s: …%s"
+            % (self._elapsed_prefix, self._elapsed_s, art, schwanz))
+
+    def _hook_stream(self, worker) -> None:
+        try:
+            worker.progress.connect(self._on_stream)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _note_model_loading(self) -> None:
+        """Say it plainly when the wait is Ollama pulling gigabytes off disk."""
+        try:
+            cfg = self._api_config()
+            if cfg.kind != "ollama":
+                return
+            geladen = T2GCore.ollama_loaded_models(cfg.base_url)
+            if cfg.model and cfg.model not in geladen:
+                self.progress_label.setText(
+                    "Modell „%s“ wird erst in den Speicher geladen – das "
+                    "dauert beim ersten Mal ein bis drei Minuten." % cfg.model)
+        except Exception:  # noqa: BLE001
+            pass
+
     def _start_elapsed(self, prefix: str, setter=None) -> None:
+        try:
+            self._current_kind = self._api_config().kind
+        except Exception:  # noqa: BLE001
+            self._current_kind = ""
         """Show a running second count while the model works."""
         self._elapsed_prefix = prefix
         self._elapsed_setter = setter or self.progress_label.setText
@@ -1686,12 +1769,23 @@ class T2GPanel(QWidget):
             timer.setInterval(1000)
             timer.timeout.connect(self._tick_elapsed)
             self._elapsed_timer = timer
+        self._stream_info = ""
         self._elapsed_setter(prefix)
         timer.start()
 
     def _tick_elapsed(self) -> None:
         self._elapsed_s += 1
-        self._elapsed_setter("%s (%d s)" % (self._elapsed_prefix, self._elapsed_s))
+        zusatz = getattr(self, "_stream_info", "")
+        if not zusatz and getattr(self, "_current_kind", "") == "pi":
+            # pi buffers its whole answer; say so instead of looking frozen
+            zusatz = ("pi arbeitet – Text kommt erst am Ende"
+                      if self._elapsed_s > 5 else "")
+        self._elapsed_setter("%s (%d s)%s"
+                             % (self._elapsed_prefix, self._elapsed_s,
+                                " · " + zusatz if zusatz else ""))
+        if self._elapsed_s == 8 and not zusatz:
+            # nothing has arrived yet -- is the model still loading?
+            self._note_model_loading()
 
     def _stop_elapsed(self) -> None:
         timer = getattr(self, "_elapsed_timer", None)
@@ -1743,6 +1837,7 @@ class T2GPanel(QWidget):
             self._chat_busy(True)
             self._start_elapsed("Modell denkt nach …")
             self._chat_worker = _ChatWorker(prompt, cfg, pi, parent=None)
+            self._hook_stream(self._chat_worker)
             self._chat_worker.done.connect(self._chat_reply)
             self._chat_worker.start()
             return
@@ -2185,6 +2280,7 @@ class T2GPanel(QWidget):
             self._agent_registry().help_block())
         self._chat_worker = _TextWorker(prompt, system, self._chat_cfg,
                                         self._chat_pi, tag="agent")
+        self._hook_stream(self._chat_worker)
         self._chat_worker.done.connect(self._agent_reply)
         self._chat_worker.start()
 
@@ -2206,6 +2302,7 @@ class T2GPanel(QWidget):
         self._chat_worker = _TextWorker(prompt, T2GCore.SUMMARY_PROMPT,
                                         T2GCore.with_thinking(self._chat_cfg, "off"),
                                         self._chat_pi, tag="zusammenfassung")
+        self._hook_stream(self._chat_worker)
         self._chat_worker.done.connect(
             lambda payload, keep=keep: self._agent_compress_done(payload, keep))
         self._chat_worker.start()
@@ -3078,6 +3175,14 @@ class T2GPanel(QWidget):
         row2.addWidget(self.lrn_build_btn)
         v.addLayout(row2)
 
+        self.lrn_progress = QProgressBar()
+        self.lrn_progress.setVisible(False)
+        self.lrn_progress.setTextVisible(True)
+        self.lrn_progress.setToolTip(
+            "Fortschritt der Lern-Warteschlange. Jeder Skill braucht einige "
+            "Minuten; „Stop“ im Dialog-Tab hält nach dem laufenden an.")
+        v.addWidget(self.lrn_progress)
+
         self.lrn_status = QLabel("")
         self.lrn_status.setWordWrap(True)
         v.addWidget(self.lrn_status)
@@ -3112,6 +3217,16 @@ class T2GPanel(QWidget):
         self._workers = [w for w in getattr(self, "_workers", [])
                          if w is not worker]
 
+    #: Code deserves more thought than a one-line action, but forcing "high"
+    #: on every skill made a plain washer take minutes. One step above what
+    #: the user chose keeps both ends reasonable.
+    _CODE_THINKING = {"auto": "auto", "off": "low", "minimal": "low",
+                      "low": "medium", "medium": "high", "high": "high"}
+
+    def _code_thinking(self, cfg) -> str:
+        return self._CODE_THINKING.get((cfg.thinking if cfg else "low") or "low",
+                                       "medium")
+
     def _learn_backend(self):
         """(cfg, pi) for the long calls, or raise with a clear message."""
         cfg = self._api_config()
@@ -3131,11 +3246,14 @@ class T2GPanel(QWidget):
         topic = self.lrn_topic.text().strip()
         if not topic:
             self.lrn_status.setText("Bitte zuerst ein Bauteil benennen.")
+            self._queue_step_failed("kein Bauteilname")
             return
         try:
             cfg, pi = self._learn_backend()
         except Exception as e:  # noqa: BLE001
             self.lrn_status.setText(str(e))
+            self.progress_label.setText("Lernen nicht möglich: %s" % e)
+            self._queue_step_failed(str(e))
             return
 
         research = None
@@ -3164,6 +3282,7 @@ class T2GPanel(QWidget):
                             self.lrn_status.setText)
         self._learn_worker = _TextWorker(prompt, T2GCore.SKILL_ANALYSE_PROMPT,
                                          cfg, pi, tag="analyse")
+        self._hook_stream(self._learn_worker)
         self._learn_worker.done.connect(self._learn_analyse_done)
         self._learn_worker.start()
 
@@ -3173,6 +3292,12 @@ class T2GPanel(QWidget):
         if payload.get("error"):
             self.lrn_status.setText("Analyse fehlgeschlagen: " + payload["error"])
             self._job_finished(False, "Analyse fehlgeschlagen: " + payload["error"])
+            if getattr(self, "_queue_total", 0):
+                self._queue_done = getattr(self, "_queue_done", 0) + 1
+                self._queue_failed = getattr(self, "_queue_failed", []) + [
+                    getattr(self, "_queue_current", "?")]
+                self._queue_progress("Analyse gescheitert")
+                QtCore.QTimer.singleShot(500, self._learn_next_in_queue)
             return
         try:
             questions, params = T2GCore.parse_skill_analysis(payload["text"])
@@ -3180,6 +3305,7 @@ class T2GPanel(QWidget):
             self.lrn_status.setText("Antwort unbrauchbar: " + str(e))
             self.log_edit.appendPlainText("Rohantwort:\n" + payload["text"][:2000])
             self._job_finished(False, "Analyse unbrauchbar: " + str(e))
+            self._queue_step_failed("Analyse unbrauchbar: %s" % e)
             return
         self.lrn_questions.setPlainText("\n".join(questions)
                                         or "(keine Rückfragen)")
@@ -3190,8 +3316,12 @@ class T2GPanel(QWidget):
         self.lrn_status.setText(
             f"{len(params)} Parameter vorgeschlagen, {len(questions)} Rückfrage(n). "
             "Antworten ergänzen, Parameter anpassen, dann „2. Skill erzeugen“.")
-        if getattr(self, "_agent_job_done", None) is not None:
-            # agent-driven: go straight on with the proposed parameters
+        unbeaufsichtigt = (getattr(self, "_agent_job_done", None) is not None
+                           or getattr(self, "_queue_total", 0) > 0)
+        if unbeaufsichtigt:
+            # agent or queue: go straight on with the proposed parameters.
+            # Without this the queue stopped after the analysis and waited for
+            # a click that nobody was there to make.
             self.lrn_answers.setPlainText(
                 "\n".join(questions) and
                 "Offene Punkte nach bestem Wissen annehmen und im Code "
@@ -3205,11 +3335,13 @@ class T2GPanel(QWidget):
         params = T2GCore.parse_param_lines(self.lrn_params.toPlainText())
         if not params:
             self.lrn_status.setText("Keine gültige Parameterzeile.")
+            self._queue_step_failed("keine Parameter vorgeschlagen")
             return
         try:
             cfg, pi = self._learn_backend()
         except Exception as e:  # noqa: BLE001
             self.lrn_status.setText(str(e))
+            self._queue_step_failed(str(e))
             return
         st = self._learn_state
         st.update({"params": params, "cfg": cfg, "pi": pi,
@@ -3223,14 +3355,18 @@ class T2GPanel(QWidget):
             st["topic"], st["params"], self.lrn_answers.toPlainText(),
             st.get("research"), st.get("code", ""), st.get("problems") or None)
         self._learn_busy(True)
+        if getattr(self, "_queue_total", 0):
+            self._queue_progress("Versuch %d/%d"
+                                 % (st["attempt"], st["max_tries"]))
         self._start_elapsed(
             f"Versuch {st['attempt']}/{st['max_tries']}: Modell schreibt build() …",
             self.lrn_status.setText)
         FreeCADGui.updateGui()
         # geometry code is worth the extra thinking, whatever the panel says
         self._learn_worker = _TextWorker(prompt, T2GCore.SKILL_CODE_PROMPT,
-                                         T2GCore.with_thinking(st["cfg"], "high"),
+                                         T2GCore.with_thinking(st["cfg"], self._code_thinking(st["cfg"])),
                                          st["pi"], tag="code")
+        self._hook_stream(self._learn_worker)
         self._learn_worker.done.connect(self._learn_build_done)
         self._learn_worker.start()
 
@@ -3240,6 +3376,8 @@ class T2GPanel(QWidget):
         if payload.get("error"):
             self._learn_busy(False)
             self.lrn_status.setText("Erzeugung fehlgeschlagen: " + payload["error"])
+            self._job_finished(False, "skill_lernen: " + payload["error"])
+            self._queue_step_failed(payload["error"])
             return
         try:
             code = T2GCore.parse_skill_code(payload["text"])
@@ -3265,7 +3403,11 @@ class T2GPanel(QWidget):
                    % (st["attempt"], "; ".join(problems[:2])))
             self.lrn_status.setText(msg)
             self._job_finished(False, "skill_lernen %s: %s" % (st["topic"], msg))
-            if getattr(self, "_learn_queue", None):
+            if getattr(self, "_queue_total", 0):
+                self._queue_done = getattr(self, "_queue_done", 0) + 1
+                self._queue_failed = getattr(self, "_queue_failed", []) + [
+                    st["topic"]]
+                self._queue_progress("gescheitert")
                 self.log_edit.appendPlainText(
                     "„%s“ übersprungen, weiter mit der Warteschlange."
                     % st["topic"])
@@ -3285,6 +3427,7 @@ class T2GPanel(QWidget):
         except Exception as e:  # noqa: BLE001
             self._learn_busy(False)
             self.lrn_status.setText("Speichern fehlgeschlagen: " + str(e))
+            self._queue_step_failed("Speichern: %s" % e)
             return
         self._learn_busy(False)
         self._skill_refresh()
@@ -3296,7 +3439,10 @@ class T2GPanel(QWidget):
         self.lrn_status.setText(msg)
         self.log_edit.appendPlainText(msg + "\n--- build() ---\n" + code)
         self.progress_label.setText(f"Skill „{name}“ gelernt – oben mit „Bauen“ einsetzbar.")
-        if getattr(self, "_learn_queue", None):
+        if getattr(self, "_queue_total", 0):
+            self._queue_done = getattr(self, "_queue_done", 0) + 1
+            self._queue_ok = getattr(self, "_queue_ok", []) + [name]
+            self._queue_progress("gelernt")
             QtCore.QTimer.singleShot(500, self._learn_next_in_queue)
         if self._project is not None:
             for sneed in self._project.skills:
@@ -3708,6 +3854,13 @@ class T2GPanel(QWidget):
         self._agent_job_done = None
         self._pending_params = []
         self._learn_queue = []
+        self._queue_total = 0
+        self._queue_done = 0
+        self._queue_current = ""
+        self._queue_ok = []
+        self._queue_failed = []
+        if hasattr(self, "lrn_progress"):
+            self.lrn_progress.setVisible(False)
         self._learn_state = {}
         self._refine_state = {}
         self._prj_tool_state = {}
@@ -3845,6 +3998,7 @@ class T2GPanel(QWidget):
                             self.prj_status.setText)
         self._prj_worker = _TextWorker(prompt, T2GCore.PROJECT_PLAN_PROMPT,
                                        cfg, pi, tag="plan")
+        self._hook_stream(self._prj_worker)
         self._prj_worker.done.connect(self._prj_plan_done)
         self._prj_worker.start()
 
@@ -4003,6 +4157,14 @@ class T2GPanel(QWidget):
             self.prj_status.setText("Kein offener Skill – alle vorhanden.")
             return
         self._learn_queue = list(offen)
+        self._queue_total = len(offen)
+        self._queue_done = 0
+        self._queue_ok: list = []
+        self._queue_failed: list = []
+        self.lrn_progress.setRange(0, self._queue_total)
+        self.lrn_progress.setValue(0)
+        self.lrn_progress.setFormat("0 von %d" % self._queue_total)
+        self.lrn_progress.setVisible(True)
         self.prj_status.setText(
             "Lerne %d Skill(s) nacheinander: %s"
             % (len(offen), ", ".join(offen)))
@@ -4010,12 +4172,84 @@ class T2GPanel(QWidget):
             "Lern-Warteschlange: " + ", ".join(offen))
         self._learn_next_in_queue()
 
+    def _queue_progress(self, phase: str = "") -> None:
+        """Show where the queue stands, and in which phase of the current one."""
+        gesamt = getattr(self, "_queue_total", 0)
+        if not gesamt:
+            return
+        fertig = getattr(self, "_queue_done", 0)
+        name = getattr(self, "_queue_current", "")
+        text = "%d von %d" % (fertig, gesamt)
+        if name:
+            text += " · %s" % name
+        if phase:
+            text += " · %s" % phase
+        self.lrn_progress.setValue(fertig)
+        self.lrn_progress.setFormat(text)
+        self.lrn_progress.setVisible(True)
+
+    def _queue_step_failed(self, grund: str) -> bool:
+        """Mark the running queue item as failed and go on.
+
+        Any early return in the learn path used to leave the queue standing
+        still with no message at all -- the bar just stayed on "Analyse".
+        """
+        if not getattr(self, "_queue_total", 0):
+            return False
+        name = getattr(self, "_queue_current", "?")
+        self._queue_done = getattr(self, "_queue_done", 0) + 1
+        self._queue_failed = getattr(self, "_queue_failed", []) + [name]
+        self._queue_progress("gescheitert")
+        self.log_edit.appendPlainText(
+            "„%s“ übersprungen: %s" % (name, grund))
+        QtCore.QTimer.singleShot(500, self._learn_next_in_queue)
+        return True
+
+    def _queue_finished(self) -> None:
+        ok = getattr(self, "_queue_ok", [])
+        schlecht = getattr(self, "_queue_failed", [])
+        self.lrn_progress.setValue(getattr(self, "_queue_total", 0))
+        self.lrn_progress.setFormat(
+            "fertig: %d gelernt%s" % (len(ok),
+                                      ", %d gescheitert" % len(schlecht)
+                                      if schlecht else ""))
+        meldung = "Warteschlange abgearbeitet: %d gelernt (%s)" % (
+            len(ok), ", ".join(ok) or "–")
+        if schlecht:
+            meldung += " · gescheitert: " + ", ".join(schlecht)
+        self.prj_status.setText(meldung)
+        self.log_edit.appendPlainText(meldung)
+        self.progress_label.setText(meldung)
+        self._queue_total = 0
+        self._queue_current = ""
+
+    #: A queue item that shows no progress for this long is given up on.
+    _QUEUE_TIMEOUT_S = 20 * 60
+
+    def _queue_watchdog(self, name: str, marke: int) -> None:
+        """Nothing may stall the queue silently, not even a wedged backend."""
+        if (getattr(self, "_queue_current", "") != name
+                or getattr(self, "_queue_done", 0) != marke
+                or not getattr(self, "_queue_total", 0)):
+            return                      # längst weiter
+        laeuft = (self._learn_worker is not None
+                  and self._learn_worker.isRunning())
+        if laeuft:
+            self._learn_worker.terminate()
+        self._stop_elapsed()
+        self._learn_busy(False)
+        self._queue_step_failed("Zeitlimit von %d Minuten überschritten"
+                                % (self._QUEUE_TIMEOUT_S // 60))
+
     def _learn_next_in_queue(self) -> None:
         queue = getattr(self, "_learn_queue", None)
         if not queue:
-            self.prj_status.setText("Warteschlange abgearbeitet.")
+            if getattr(self, "_queue_total", 0):
+                self._queue_finished()
             return
         name = queue.pop(0)
+        self._queue_current = name
+        self._queue_progress("Analyse")
         p = self._project
         need = next((x for x in (p.skills if p else []) if x.name == name), None)
         self.lrn_topic.setText(name)
@@ -4029,6 +4263,10 @@ class T2GPanel(QWidget):
         self.prj_status.setText(
             "Lerne „%s“ … (%d weitere in der Warteschlange)" % (name, len(queue)))
         self._queue_job = True
+        marke = getattr(self, "_queue_done", 0)
+        QtCore.QTimer.singleShot(
+            self._QUEUE_TIMEOUT_S * 1000,
+            lambda n=name, m=marke: self._queue_watchdog(n, m))
         self._learn_analyse()
 
     def _prj_learn_missing(self) -> None:
@@ -4109,6 +4347,7 @@ class T2GPanel(QWidget):
                             self.prj_status.setText)
         self._prj_worker = _TextWorker(prompt, T2GCore.PROJECT_PAIRS_PROMPT,
                                        cfg, pi, tag="paare")
+        self._hook_stream(self._prj_worker)
         self._prj_worker.done.connect(self._prj_pairs_done)
         self._prj_worker.start()
 
@@ -4416,8 +4655,9 @@ class T2GPanel(QWidget):
             % (st["attempt"], st["max_tries"], st["name"]),
             self.prj_tool_status.setText)
         self._prj_worker = _TextWorker(prompt, T2GCore.TOOL_CODE_PROMPT,
-                                       T2GCore.with_thinking(st["cfg"], "high"),
+                                       T2GCore.with_thinking(st["cfg"], self._code_thinking(st["cfg"])),
                                        st["pi"], tag="werkzeug")
+        self._hook_stream(self._prj_worker)
         self._prj_worker.done.connect(self._prj_tool_done)
         self._prj_worker.start()
 
@@ -4582,8 +4822,9 @@ class T2GPanel(QWidget):
             % (st["attempt"], st["max_tries"], st["name"]),
             self.ref_status.setText)
         self._refine_worker = _TextWorker(prompt, T2GCore.SKILL_REFINE_PROMPT,
-                                          T2GCore.with_thinking(st["cfg"], "high"),
+                                          T2GCore.with_thinking(st["cfg"], self._code_thinking(st["cfg"])),
                                           st["pi"], tag="verfeinern")
+        self._hook_stream(self._refine_worker)
         self._refine_worker.done.connect(self._refine_done)
         self._refine_worker.start()
 

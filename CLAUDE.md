@@ -281,6 +281,39 @@ Reasoning comes from three different places and all three are read:
 services), and `thinking` blocks in pi's NDJSON (`extract_thinking`), plus
 `<think>` tags (`split_thinking`).
 
+### Show the work, never a frozen panel
+
+`call_model_verbose(..., on_progress=cb)` streams: `_stream_api_call` reads
+Ollama's and the OpenAI-style chunked responses and reports every piece, which
+`_TextWorker.progress` forwards (throttled to 4/s) to `_on_stream`. The status
+line then shows "denkt: …" / "schreibt: …" as the answer forms.
+
+Measured on this machine, same prompt and model: **direct Ollama 14 s with the
+first characters after 0.6 s; through pi over 300 s with no output at all**
+(pi spawns Node and buffers everything). Hence the warning in the backend
+status and the "pi arbeitet – Text kommt erst am Ende" heartbeat; pi cannot be
+streamed.
+
+When nothing has arrived after 8 s, `_note_model_loading()` checks
+`ollama_loaded_models()` (`/api/ps`) and says the model is being pulled off
+disk -- a cold 17 GB model really does take minutes, and that once looked like
+a hang for 283 s.
+
+`_CODE_THINKING` lifts the panel's thinking level by one step for code
+generation instead of pinning it to "high": a plain washer took minutes at
+"high" and 116 s at "medium".
+
+### The learn queue
+
+`_prj_learn_all` fills `_learn_queue` and `_queue_progress()` drives the
+progress bar (`n von m · name · Phase`). Two things it must keep doing:
+- **Continue unattended.** `_learn_analyse_done` runs `_learn_build()` when a
+  queue or the agent is driving; without that the queue stopped after the
+  analysis and waited for a click nobody would make.
+- **Never stall silently.** Every early return in the learn path calls
+  `_queue_step_failed()`, and `_queue_watchdog` gives up on an item after 20
+  minutes. A stuck queue used to show "Analyse" forever with no message.
+
 ### Never block the GUI thread
 
 Anything that touches the network or spawns a process runs in a `_CallWorker`

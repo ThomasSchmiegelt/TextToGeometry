@@ -209,6 +209,95 @@ def _thinking_for_pi(level: str) -> str:
                           "xhigh", "max") else ""
 
 
+def _stream_api_call(cfg: APIConfig, system_prompt: str, user_prompt: str,
+                     on_chunk, thoughts: list | None = None,
+                     thinking: str | None = None) -> str:
+    """Like :func:`_t2g_api_call`, but reports the answer as it arrives.
+
+    ``on_chunk(text_delta, thinking_delta)`` is called for every piece the
+    server sends, so the panel can show the model working instead of a frozen
+    "please wait".
+    """
+    if cfg.kind == "ollama":
+        base = cfg.base_url.rstrip("/")
+        if base.endswith("/v1"):
+            base = base[:-3].rstrip("/")
+        url = base + "/api/chat"
+        body = {"model": cfg.model,
+                "messages": [{"role": "system", "content": system_prompt},
+                             {"role": "user", "content": user_prompt}],
+                "stream": True,
+                "options": {"temperature": cfg.temperature}}
+        think = _thinking_for_ollama(cfg.thinking if thinking is None else thinking)
+        if think is not None:
+            body["think"] = think
+        headers = {"Content-Type": "application/json"}
+    else:
+        url = cfg.base_url.rstrip("/")
+        if not url.endswith("/chat/completions"):
+            url += "/chat/completions"
+        body = {"model": cfg.model,
+                "messages": [{"role": "system", "content": system_prompt},
+                             {"role": "user", "content": user_prompt}],
+                "temperature": cfg.temperature, "stream": True}
+        if cfg.max_tokens > 0:
+            body["max_tokens"] = cfg.max_tokens
+        effort = (cfg.thinking if thinking is None else thinking or "").lower()
+        if effort in ("low", "medium", "high"):
+            body["reasoning_effort"] = effort
+        headers = {"Content-Type": "application/json"}
+        if cfg.api_key:
+            headers["Authorization"] = "Bearer " + cfg.api_key
+
+    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"),
+                                 headers=headers, method="POST")
+    text_parts: list = []
+    try:
+        with urllib.request.urlopen(req, timeout=cfg.timeout_s) as resp:
+            for raw in resp:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line:
+                    continue
+                if line.startswith("data:"):          # OpenAI-style SSE
+                    line = line[5:].strip()
+                    if line == "[DONE]":
+                        break
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if cfg.kind == "ollama":
+                    msg = obj.get("message") or {}
+                    stueck = msg.get("content") or ""
+                    denken = msg.get("thinking") or ""
+                else:
+                    choices = obj.get("choices") or [{}]
+                    delta = (choices[0].get("delta")
+                             or choices[0].get("message") or {})
+                    stueck = delta.get("content") or ""
+                    denken = (delta.get("reasoning_content")
+                              or delta.get("reasoning") or "")
+                if stueck:
+                    text_parts.append(stueck)
+                if denken and thoughts is not None:
+                    thoughts.append(denken)
+                if (stueck or denken) and on_chunk is not None:
+                    on_chunk(stueck, denken)
+                if obj.get("done") is True:
+                    break
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", "replace")[:300]
+        except Exception:  # noqa: BLE001
+            pass
+        raise BackendError(f"API failed: HTTP {e.code} from {url} {detail}",
+                           "", int(e.code)) from e
+    except Exception as e:  # noqa: BLE001
+        raise BackendError(f"API unreachable: {url} ({e})", "", -1) from e
+    return "".join(text_parts)
+
+
 def _t2g_api_call(cfg: APIConfig, system_prompt: str, user_prompt: str,
                   thoughts: list | None = None,
                   thinking: str | None = None) -> str:
@@ -1031,6 +1120,23 @@ def probe_ollama(base_url: str | None = None, timeout_s: float = 3.0) -> list:
             for m in (payload.get("models") or [])]
 
 
+def ollama_loaded_models(base_url: str | None = None,
+                         timeout_s: float = 3.0) -> list:
+    """Models Ollama currently holds in memory (``/api/ps``).
+
+    Worth knowing before a call: an unloaded 17 GB model takes minutes to come
+    off disk, and without this the wait looks like a hang.
+    """
+    url = _ollama_root(base_url) + "/api/ps"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout_s) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+    return [m.get("name") or m.get("model") or ""
+            for m in (payload.get("models") or [])]
+
+
 def ollama_running(base_url: str | None = None, timeout_s: float = 2.0) -> bool:
     try:
         probe_ollama(base_url, timeout_s=timeout_s)
@@ -1198,7 +1304,8 @@ def call_model_verbose(prompt: str, system_prompt: str,
                        cfg: "APIConfig | None" = None,
                        pi_binary: str | None = None,
                        timeout_s: int | None = None,
-                       thinking: str | None = None) -> "tuple[str, str]":
+                       thinking: str | None = None,
+                       on_progress=None) -> "tuple[str, str]":
     """One model call -> ``(answer, thinking)``.
 
     The single place that knows how each backend is invoked; before this, the
@@ -1206,7 +1313,11 @@ def call_model_verbose(prompt: str, system_prompt: str,
     """
     if cfg is not None and cfg.kind in ("openai", "ollama"):
         thoughts: list = []
-        raw = _t2g_api_call(cfg, system_prompt, prompt, thoughts, thinking)
+        if on_progress is not None:
+            raw = _stream_api_call(cfg, system_prompt, prompt, on_progress,
+                                   thoughts, thinking)
+        else:
+            raw = _t2g_api_call(cfg, system_prompt, prompt, thoughts, thinking)
         thinking, answer = split_thinking(raw)
         if thoughts:
             thinking = "\n".join(t for t in thoughts + [thinking] if t)
@@ -1232,9 +1343,10 @@ def call_model(prompt: str, system_prompt: str,
                cfg: "APIConfig | None" = None,
                pi_binary: str | None = None,
                timeout_s: int | None = None,
-               thinking: str | None = None) -> str:
+               thinking: str | None = None,
+               on_progress=None) -> str:
     return call_model_verbose(prompt, system_prompt, cfg, pi_binary,
-                              timeout_s, thinking)[0]
+                              timeout_s, thinking, on_progress)[0]
 
 
 def with_thinking(cfg: "APIConfig | None", level: str) -> "APIConfig | None":
@@ -2833,6 +2945,7 @@ __all__ = [
     "chat_backend",
     "OLLAMA_DEFAULT_URL", "probe_ollama", "ollama_running", "start_ollama",
     "openai_models", "pi_models", "list_models", "call_model",
+    "ollama_loaded_models",
     "call_model_verbose", "extract_thinking", "split_thinking",
     "THINKING_LEVELS", "with_thinking",
     "backend_status", "detect_backend",
