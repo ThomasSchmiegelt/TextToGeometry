@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary
 """The agent loop behind the chat window.
 
 The chat is the main way in: the user says "neues Zylinderkopfprojekt" and the

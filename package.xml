@@ -3,12 +3,12 @@
     <name>TextToGeometry</name>
     <description>Konstruktionsagent für FreeCAD: Chat-Dialog am offenen Dokument, Projekte mit gewichteten Kriterien und Abhängigkeitsgraph, lernbare parametrische Skills, Werkzeuge, Festigkeitsanalyse. Läuft lokal über Ollama oder über einen OpenAI-kompatiblen API-Zugang.</description>
     <icon>Resources/icons/text-to-geometry.svg</icon>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
     <date>2026-09-13</date>
-    <maintainer email="cae@example.invalid">cae</maintainer>
-    <license file="Resources/licenses/LGPL-2.1-or-later.txt">LGPL-2.1-or-later</license>
-    <url type="repository" branch="main">https://example.invalid/TextToGeometry</url>
-    <url type="readme">https://example.invalid/TextToGeometry/README.md</url>
+    <maintainer>Thomas Schmiegelt</maintainer>
+    <license file="LICENSE">LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary</license>
+    <url type="repository" branch="main">https://github.com/ThomasSchmiegelt/TextToGeometry</url>
+    <url type="readme">https://github.com/ThomasSchmiegelt/TextToGeometry/blob/main/README.md</url>
     <content>
         <workbench>
             <name>TextToGeometryWorkbench</name>

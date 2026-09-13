@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary
 
 # Text to Geometry — FreeCAD Workbench
 
@@ -592,6 +592,21 @@ T2G_PI_BIN=/path/to/pi FreeCADCmd e2e_bridge_drawing.py   # writes T2G_OUT (brid
 | `Generated code did not define a top-level 'result'` | Model returned unusable code; retry with a more explicit prompt. |
 | A variant shows `[MISS]` | A target was not met even after the feedback iterations — inspect the exported CSV / raise the iteration count. |
 
-## License
+## Lizenz
 
-LGPL-2.1-or-later (see `Resources/licenses/LGPL-2.1-or-later.txt`).
+**PolyForm Noncommercial License 1.0.0 mit Militär-Ausschluss** — siehe
+[`LICENSE`](LICENSE).
+
+| erlaubt | untersagt |
+|---------|-----------|
+| privat, Forschung, Lehre, gemeinnützig | jede kommerzielle Nutzung |
+| Weitergabe mit Lizenzhinweis | Streitkräfte, Waffen, militärische Operationen |
+| Änderungen und eigene Ableitungen | (Ausnahme: humanitäre Minenräumung, Katastrophenhilfe) |
+
+Das ist **kein Open Source** im Sinne der OSI: Solche Einschränkungen sind dort
+ausdrücklich nicht zulässig. Aus demselben Grund kommt die Workbench nicht in
+den offiziellen FreeCAD-Addon-Manager — die Installation läuft über
+`install.py` oder das ZIP-Paket.
+
+Frühere Fassungen bis Commit `8fc65f9` standen unter LGPL-2.1-or-later; wer
+diesen Stand hat, behält die dortigen Rechte daran.

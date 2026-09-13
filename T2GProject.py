@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary
 """Project workspace for TextToGeometry.
 
 A *project* is a directory that keeps everything belonging to one construction
@@ -866,7 +866,7 @@ class Project:
         safe = slugify(name, fallback="werkzeug")
         os.makedirs(self.tools_dir, exist_ok=True)
         path = os.path.join(self.tools_dir, safe + ".py")
-        header = (f"# SPDX-License-Identifier: LGPL-2.1-or-later\n"
+        header = (f"# SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary\n"
                   f'"""{purpose or name}"""\n\n')
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(header + code.strip() + "\n")

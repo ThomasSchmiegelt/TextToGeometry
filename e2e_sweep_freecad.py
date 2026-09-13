@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary
 """Headless E2E sweep test (FreeCADCmd) using the REAL LLM pipeline.
 
 Runs the exact path the dialog uses:

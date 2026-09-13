@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary
 """External tools the workbench can call: macros, add-ons and Python modules.
 
 Not everything has to be generated. A FreeCAD installation usually already

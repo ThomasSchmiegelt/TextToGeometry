@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary
 """Command + dialog for TextToGeometry (extended with variant tables and targets).
 
 Variant sources: free text (one variant), CSV file, XLSX file,

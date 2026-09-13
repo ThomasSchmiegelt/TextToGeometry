@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary
 """Tests for web research + learning a skill.
 
 Network access is only exercised when T2G_TEST_NET=1; everything else runs

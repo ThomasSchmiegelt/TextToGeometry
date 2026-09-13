@@ -357,6 +357,20 @@ signals and `request_stop()`. Cancellation is cooperative — `run_sweep` checks
 in-flight LLM call. Shapes must only be added to the document on the GUI thread
 (`_add_results`).
 
+## Licensing
+
+The project is **not** open source: PolyForm Noncommercial 1.0.0 plus an
+additional term forbidding military use (`LICENSE`, SPDX
+`LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary`). Commits up to `8fc65f9`
+were LGPL-2.1-or-later and stay that way for whoever has them.
+
+Consequences to keep in mind: every source file carries the SPDX header, the
+generators in `T2GSkills.create_skill` and `Project.write_tool` stamp it into
+what they emit, and `package.xml` points at `LICENSE`. Do not pull in code
+under a copyleft licence (GPL/LGPL source, not just the FreeCAD API) — it
+cannot be combined with these terms. Calling the FreeCAD API is fine; copying
+FreeCAD or add-on source into this tree is not.
+
 ## Gotchas
 
 - `python3 test_skills.py` reports 2 failures (`'NoneType' object has no attribute

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary
 
 """TextToGeometry – Skills engine.
 
@@ -535,7 +535,7 @@ def validate_skill_source(name: str, params: list, build_code: str,
 # Skill creator (writes a new skill module)
 # ---------------------------------------------------------------------------
 
-_HEADER = '''# SPDX-License-Identifier: LGPL-2.1-or-later
+_HEADER = '''# SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary
 '''
 
 

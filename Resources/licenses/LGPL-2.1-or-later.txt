@@ -1,3 +1,7 @@
+Dieser LGPL-Text gilt nur noch fuer die Fassungen bis Commit
+8fc65f9. Ab danach gilt ../../LICENSE (PolyForm Noncommercial
+1.0.0 mit Militaer-Ausschluss).
+
                   GNU LESSER GENERAL PUBLIC LICENSE
                        Version 2.1, February 1999
 

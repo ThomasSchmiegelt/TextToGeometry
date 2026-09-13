@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary
 """Install the TextToGeometry workbench into a FreeCAD Mod directory.
 
     python3 install.py            # find FreeCAD, install into every Mod dir found
