@@ -26,7 +26,8 @@ python3 test_learn.py   # 26 tests: research, skill learning, validation
 python3 test_project.py # 61 tests: project layout, AHP maths, matching, params, graph
 python3 test_agent.py   # 24 tests: agent protocol, action registry, run budget
 FreeCADCmd test_skills.py   # skills engine — needs the REAL Part module (see gotcha)
-FreeCADCmd test_bauen.py    # 30 checks: placement, replace, collisions, bearing, tools
+FreeCADCmd test_bauen.py    # 32 checks: placement, replace, collisions, bearing, tools
+FreeCADCmd test_getriebe_makro.py  # 24 checks: mask, DIN 625, housing, FCGear
 FreeCADCmd Beispiele/getriebe_5gang.py   # reference gearbox; exits 1 if a promise breaks
 FreeCADCmd test_bauen.py    # 24 checks: placement, replace, collisions, bearing, mesh phase
 FreeCADCmd Beispiele/getriebe_5gang.py   # reference gearbox; exits 1 if a promise breaks
@@ -324,6 +325,48 @@ schritt", not "nächster schritt", and "gebaut", not "eingetragen". Word lists
 only ever know the cases that already happened. The check that holds is the
 state: parts still `offen` in the project, or no new solid in the document, means
 the job is not done however the answer is phrased.
+
+### The macro line: FCGear, DIN bearings, contour housing
+
+A second, independent way to build a gearbox, next to `Tools/getriebe.py` —
+that one stays untouched. Logic lives in importable `Tools/*.py` (testable, and
+the agent reaches it through `skill_bauen`); the `.FCMacro` files in `Macros/`
+are thin starters, because a macro gets no arguments and returns nothing
+(`run_external_tool`, `T2GCommand.py:4955`).
+
+- `Tools/t2g_maske.py` — the extensible mask. Fields are appended to a list,
+  not coded: `Feld(name, label, einheit, default, min, max, auswahl, gruppe)`.
+  Number → `QDoubleSpinBox`, `auswahl` → `QComboBox`, else `QLineEdit`, one tab
+  per group. Values are remembered in the FreeCAD preferences. Without a GUI it
+  returns the defaults, so tests and the agent path run.
+- `Tools/lager_din625.py` — series 60xx/62xx/63xx, d 10…50. **Only d, D, B and
+  r are standardised**; ball count and diameter are not, and are estimated from
+  the geometric limit `n < pi/asin(r_kugel/r_mitte)` times 0.7 (a 6204 gets 9,
+  the real one has 8). A first attempt with a fudge factor packed in 15 balls
+  that touched each other.
+- `Tools/werkstoff.py` — 100Cr6 is not among FreeCAD's 200 cards, and
+  `PropertyMaterial::Save()` stores **only the UUID**, so a material built at
+  runtime is gone after reopening. The module writes the card into the user
+  library (which sits at `v1-1/Material`, not `FreeCAD/Material`) and falls
+  back to `CalculiX-Steel` audibly, never silently.
+- `Tools/gehaeuse_kontur.py` — the wall follows the gear contour. Split in the
+  plane **through both shaft axes**, not midway between them: that one is
+  skew, does not halve the bearing seats, and split 220973 against 66158 mm³.
+  The flange runs along the shaft; its bolts sit on the two ears at the real
+  ends of the contour, not symmetric about the first axis, or one of them cuts
+  air. `baue()` counts how many holes hit material.
+- `Tools/getriebe_fcgear.py` — real involute gears, idlers and shift sleeves.
+
+Two facts that cost a measurement each: the idler needs **half a tooth pitch**
+of phase (`180/z2`), or gear pair 1 penetrates by 11.8 %; and a helical mating
+gear needs the **opposite hand** (`-schraegwinkel`), because two same-hand
+helical gears on parallel shafts do not mesh (5.7 % penetration). The housing
+also needs shaft bores, or the shaft sits inside the end wall (2.7 %).
+
+FCGear itself: `num_teeth` not `teeth`, `helix_angle` not `beta`, an
+`ActiveDocument` must exist, `recompute()` is mandatory before `Shape` or
+`pitch_diameter` mean anything. The parameter objects are removed again after
+the shape is read — otherwise a dozen of them recompute on every change.
 
 ### Fits, and why they matter to the checks
 

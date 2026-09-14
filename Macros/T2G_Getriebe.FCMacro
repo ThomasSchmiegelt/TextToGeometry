@@ -1,0 +1,146 @@
+# SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary
+"""Baut ein vollständiges Schaltgetriebe — mit Eingabemaske.
+
+Die Zahnräder kommen vom Add-on FCGear (echte Evolventenverzahnung, wahlweise
+gerade, schräg oder Pfeilverzahnung), die Lager sind nach DIN 625-1 bemaßt und
+mit Werkstoff hinterlegt, und das Gehäuse folgt der Kontur der Räder statt ein
+Quader zu sein — geteilt in der Ebene durch beide Wellen, mit Flansch und
+Durchgangsbohrungen.
+
+Kinematisch ist es ein Vorgelege mit Losrädern und Schaltmuffen: die kleinen
+Räder sitzen fest auf der Eingangswelle, die großen laufen lose auf der
+Ausgangswelle. Alle Gänge auf einem Achsabstand, also z1 + z2 = konstant.
+
+Die Rechen- und Geometriearbeit steckt in ``Tools/getriebe_fcgear.py`` des
+Add-ons TextToGeometry; dieses Makro ist nur der Starter. Dieselbe Funktion
+ist für den Agenten über ``skill_bauen: getriebe_fcgear;gaenge=5`` erreichbar.
+"""
+
+import os
+import sys
+
+import FreeCAD
+
+
+def _tools_pfad():
+    """Das Tools-Verzeichnis des Add-ons finden, von wo auch immer wir laufen."""
+    kandidaten = []
+    try:
+        hier = os.path.dirname(os.path.abspath(__file__))
+        kandidaten.append(os.path.join(os.path.dirname(hier), "Tools"))
+    except NameError:
+        pass
+    try:
+        kandidaten.append(os.path.join(FreeCAD.getUserAppDataDir(), "Mod",
+                                       "TextToGeometry", "Tools"))
+    except Exception:  # noqa: BLE001
+        pass
+    kandidaten.append(os.path.join(os.path.expanduser("~"), ".local", "share",
+                                   "FreeCAD", "v1-1", "Mod", "TextToGeometry",
+                                   "Tools"))
+    for p in kandidaten:
+        if os.path.isdir(p):
+            return p
+    return None
+
+
+def _melde(text):
+    FreeCAD.Console.PrintMessage("T2G Getriebe: %s\n" % text)
+
+
+def felder(M, LG, GF):
+    """Die Maske. Erweitert wird sie hier — durch eine Zeile mehr."""
+    return [
+        M.Feld("gaenge", "Gänge", "Stk", 5, 1, 12, gruppe="Getriebe"),
+        M.Feld("zaehne_summe", "Zähnesumme z1+z2", "", 48, 20, 200,
+               gruppe="Getriebe",
+               hinweis="Für alle Gänge gleich — daraus folgt ein Achsabstand"),
+        M.Feld("modul", "Modul", "mm", 2.0, 0.3, 20.0, gruppe="Getriebe"),
+        M.Feld("breite", "Zahnbreite", "mm", 12.0, 1.0, 200.0,
+               gruppe="Getriebe"),
+        M.Feld("luft", "Luft zwischen den Radpaaren", "mm", 6.0, 1.0, 100.0,
+               gruppe="Getriebe",
+               hinweis="Hier hinein passt die Schaltmuffe"),
+
+        M.Feld("verzahnung", "Verzahnung", "", "gerade",
+               auswahl=list(GF.VERZAHNUNG), gruppe="Verzahnung"),
+        M.Feld("schraegwinkel", "Schrägungswinkel", "Grad", 15.0, 0.0, 45.0,
+               gruppe="Verzahnung",
+               hinweis="Wirkt bei „schraeg\" und „pfeil\""),
+        M.Feld("eingriffswinkel", "Eingriffswinkel", "Grad", 20.0, 14.0, 30.0,
+               gruppe="Verzahnung"),
+        M.Feld("flankenspiel", "Flankenspiel", "mm", 0.05, 0.0, 1.0,
+               gruppe="Verzahnung"),
+
+        M.Feld("welle_d", "Wellendurchmesser", "mm", 20.0, 5.0, 200.0,
+               gruppe="Wellen und Lager"),
+        M.Feld("lager_reihe", "Lagerreihe", "", "62",
+               auswahl=list(LG.reihen()), gruppe="Wellen und Lager",
+               hinweis="60 leicht · 62 mittel · 63 schwer (DIN 625-1)"),
+        M.Feld("spiel", "Passungsspiel", "mm", 0.1, 0.0, 2.0,
+               gruppe="Wellen und Lager"),
+        M.Feld("muffe_b", "Breite der Schaltmuffe", "mm", 0.0, 0.0, 100.0,
+               gruppe="Wellen und Lager",
+               hinweis="0 = in die Lücke zwischen den Rädern einpassen"),
+
+        M.Feld("gehaeuse_luft", "Freigang Rad → Innenwand", "mm", 3.0, 0.0,
+               100.0, gruppe="Gehäuse"),
+        M.Feld("wand", "Wandstärke", "mm", 4.0, 1.0, 100.0, gruppe="Gehäuse"),
+        M.Feld("flansch_b", "Flanschbreite", "mm", 12.0, 2.0, 100.0,
+               gruppe="Gehäuse"),
+        M.Feld("schraube_d", "Schraubendurchmesser", "mm", 6.0, 2.0, 30.0,
+               gruppe="Gehäuse"),
+    ]
+
+
+def haupt():
+    pfad = _tools_pfad()
+    if pfad is None:
+        FreeCAD.Console.PrintError(
+            "T2G Getriebe: Das Add-on TextToGeometry wurde nicht gefunden.\n")
+        return
+    if pfad not in sys.path:
+        sys.path.insert(0, pfad)
+
+    import t2g_maske as M
+    import lager_din625 as LG
+    try:
+        import getriebe_fcgear as GF
+    except Exception as e:  # noqa: BLE001
+        FreeCAD.Console.PrintError("T2G Getriebe: %s\n" % e)
+        return
+
+    werte = M.frage_ab(felder(M, LG, GF), "Schaltgetriebe", kennung="getriebe")
+    if werte is None:
+        _melde("abgebrochen")
+        return
+
+    k = GF.kennwerte(**werte)
+    _melde("Achsabstand %.1f mm · Lager %s · Baulänge %.1f mm"
+           % (k["achsabstand"], k["lager"], k["baulaenge"]))
+    for nr, (z1, z2, i) in enumerate(k["gangpaare"], 1):
+        _melde("  Gang %d: %d/%d Zähne, i = %.3f" % (nr, z1, z2, i))
+
+    doc = FreeCAD.ActiveDocument or FreeCAD.newDocument("Getriebe")
+    objekte, meldung = GF.baue_mit_werkstoff(doc=doc, **werte)
+    _melde("%d Bauteile, zusammen %.0f mm^3 (%.2f kg bei 7,85 g/cm³) — %s"
+           % (len(objekte), sum(o.Shape.Volume for o in objekte),
+              sum(o.Shape.Volume for o in objekte) * 7.85e-6, meldung))
+
+    schlecht = [t for ok, t in GF.pruefe([(o.Label, o.Shape) for o in objekte],
+                                         gehaeuse_luft=werte["gehaeuse_luft"])
+                if not ok]
+    if schlecht:
+        FreeCAD.Console.PrintWarning(
+            "T2G Getriebe: %s\n" % "; ".join(schlecht))
+    else:
+        _melde("Prüfung: alle Zusagen eingehalten")
+
+    try:
+        import FreeCADGui
+        FreeCADGui.SendMsgToActiveView("ViewFit")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+haupt()

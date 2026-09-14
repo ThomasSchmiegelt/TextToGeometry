@@ -80,11 +80,20 @@ def _expand(patterns) -> list:
     return sorted(set(out))
 
 
+#: Kommentarzeilen, die nichts über den Inhalt sagen.
+_LEERE_KOMMENTARE = ("spdx-", "-*-", "!/", "coding:", "noqa")
+
+
 def _first_doc(path: str) -> str:
-    """The first docstring or comment block of a script, as its description."""
+    """The first docstring or comment block of a script, as its description.
+
+    Reads the whole file, not the first 4 KB: a truncated file usually fails
+    to parse, and the fallback then returned the SPDX header as the
+    description -- which is what two macros showed in the tool list.
+    """
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
-            text = fh.read(4000)
+            text = fh.read(200000)
     except OSError:
         return ""
     try:
@@ -97,7 +106,10 @@ def _first_doc(path: str) -> str:
     for line in text.splitlines():
         line = line.strip()
         if line.startswith("#") and len(line) > 3:
-            return line.lstrip("# ").strip()[:200]
+            nackt = line.lstrip("# ").strip()
+            if any(nackt.lower().startswith(w) for w in _LEERE_KOMMENTARE):
+                continue
+            return nackt[:200]
         if line and not line.startswith(("#", '"', "'")):
             break
     return ""

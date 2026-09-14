@@ -108,7 +108,7 @@ def bohrpunkte(laenge, schraube_d, mindestens=2):
 
 
 def baue(achsen, radien, breite=60.0, luft=3.0, wand=4.0, flansch_b=12.0,
-         schraube_d=6.0, x0=0.0, achse="x"):
+         schraube_d=6.0, wellen_d=0.0, x0=0.0, achse="x"):
     """Gehäuseober- und -unterteil als (Bezeichnung, Shape)-Paare.
 
     achsen      Liste von (y, z) der Radachsen in der Radebene [mm]
@@ -118,6 +118,9 @@ def baue(achsen, radien, breite=60.0, luft=3.0, wand=4.0, flansch_b=12.0,
     wand        Wandstärke [mm]
     flansch_b   Breite des Flansches am Trennstoß [mm]
     schraube_d  Durchgangsbohrung im Flansch [mm]
+    wellen_d    Durchbruch in den Stirnwänden je Achse [mm]; 0 = keiner.
+                Sinnvoll ist der Lageraußendurchmesser — dann sitzt das Lager
+                im Gehäuse, und die Welle steckt nicht in der Wand.
     achse       Richtung der Wellen: "x" (Vorgabe), "y" oder "z"
     """
     breite, luft, wand = float(breite), float(luft), float(wand)
@@ -175,6 +178,19 @@ def baue(achsen, radien, breite=60.0, luft=3.0, wand=4.0, flansch_b=12.0,
                     koerper = geschnitten
                     gebohrt += 1
             except Exception:  # noqa: BLE001 - eine Bohrung weniger ist kein Abbruch
+                continue
+
+    # Wellendurchbrüche in den Stirnwänden — der Innenraum ist ohnehin hohl,
+    # der Schnitt trifft also nur die beiden Stirnwände und bildet zugleich
+    # den Lagersitz.
+    if float(wellen_d) > 0.0:
+        for (ya, za) in achsen:
+            durchbruch = Part.makeCylinder(
+                float(wellen_d) / 2.0, gesamt_h + 2.0,
+                Vector(float(ya), float(za), -1.0))
+            try:
+                koerper = koerper.cut(durchbruch)
+            except Exception:  # noqa: BLE001
                 continue
 
     # Teilen in der Ebene durch die Wellen.

@@ -33,9 +33,9 @@ FILES = [
     "install.py", "LICENSE",
     "test_core.py", "test_ext.py", "test_skills.py", "test_chat.py",
     "test_learn.py", "test_project.py", "test_agent.py",
-    "test_tools.py", "test_bauen.py",
+    "test_tools.py", "test_bauen.py", "test_getriebe_makro.py",
 ]
-DIRS = ["Resources", "Skills", "Tools"]
+DIRS = ["Resources", "Skills", "Tools", "Macros"]
 
 #: Directories that belong to the user, not to the add-on -- never overwritten.
 KEEP_ON_UPDATE = ("Skills",)
@@ -157,9 +157,52 @@ def install_into(mod_dir: str, quiet: bool = False) -> str:
             if d == "__pycache__":
                 shutil.rmtree(os.path.join(root, d), ignore_errors=True)
                 dirs.remove(d)
+    makros = kopiere_makros(dest, quiet=quiet)
     if not quiet:
         print("  installiert: %s (%d Einträge)" % (dest, copied))
+        if makros:
+            print("  Makros im Makro-Menü: %d" % makros)
     return dest
+
+
+def makro_ordner(mod_dir: str) -> "str | None":
+    """FreeCADs Makro-Ordner, abgeleitet aus dem Mod-Verzeichnis.
+
+    ``<AppData>/Mod`` liegt neben ``<AppData>/Macro`` — den Ordner über
+    FreeCAD selbst zu erfragen ginge nur aus FreeCAD heraus, und install.py
+    läuft auch unter reinem Python.
+    """
+    basis = os.path.dirname(os.path.abspath(mod_dir))
+    kandidat = os.path.join(basis, "Macro")
+    if os.path.isdir(kandidat):
+        return kandidat
+    return None
+
+
+def kopiere_makros(dest: str, quiet: bool = False) -> int:
+    """Die .FCMacro-Dateien zusätzlich in FreeCADs Makro-Ordner legen.
+
+    Ohne das findet sie niemand: ``T2GTools.MACRO_DIRS`` durchsucht nur
+    FreeCADs eigene Makro-Ordner, nie das Add-on-Verzeichnis — und FreeCADs
+    Makro-Menü erst recht nicht.
+    """
+    quelle = os.path.join(HERE, "Macros")
+    if not os.path.isdir(quelle):
+        return 0
+    ziel = makro_ordner(os.path.dirname(dest))
+    if ziel is None:
+        return 0
+    n = 0
+    for name in sorted(os.listdir(quelle)):
+        if not name.endswith((".FCMacro", ".fcmacro")):
+            continue
+        try:
+            shutil.copy2(os.path.join(quelle, name), os.path.join(ziel, name))
+            n += 1
+        except OSError as e:
+            if not quiet:
+                print("  Makro %s nicht kopiert: %s" % (name, e))
+    return n
 
 
 def uninstall_from(mod_dir: str) -> bool:
