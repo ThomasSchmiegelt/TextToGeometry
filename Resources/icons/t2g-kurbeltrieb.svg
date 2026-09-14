@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>Kurbeltrieb bauen</title>
+  <rect x="1" y="1" width="30" height="30" rx="5" fill="#3b1f26" stroke="#220e13" stroke-width="1"/>
+  <!-- Kolben -->
+  <rect x="11" y="4" width="10" height="7" rx="1" fill="#f0a0a8"/>
+  <path d="M13 11 h6" stroke="#c4626f" stroke-width="1.4"/>
+  <!-- Pleuel -->
+  <path d="M16 11 L21 21" stroke="#f0a0a8" stroke-width="2.6" stroke-linecap="round"/>
+  <!-- Kurbelwelle: Hauptlager und Hubzapfen -->
+  <circle cx="16" cy="24" r="4.6" fill="none" stroke="#c4626f" stroke-width="2"/>
+  <circle cx="21" cy="21" r="2.3" fill="#f0a0a8"/>
+  <circle cx="16" cy="24" r="1.6" fill="#f0a0a8"/>
+  <!-- Ventil -->
+  <path d="M25 5 v9" stroke="#f0a0a8" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M22.5 14 h5 l-2.5 3 z" fill="#f0a0a8"/>
+</svg>

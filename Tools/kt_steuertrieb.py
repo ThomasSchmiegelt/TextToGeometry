@@ -230,14 +230,17 @@ def _kettenbahn(r1, r2, a, glieder, teilung, rollen_d, breite):
         bahn.append(Vector(0.0, (r2 - (r2 - r1) * t), a * (1.0 - t)))
 
     # An den Uebergaengen zwischen Bogen und Tangente fallen Punkte
-    # aufeinander — gemessen 95 % Durchdringung zweier Rollen. Wer naeher
-    # liegt als eine halbe Teilung, faellt weg.
+    # aufeinander — gemessen 95 % Durchdringung zweier Rollen. Der
+    # Mindestabstand ist der ROLLENDURCHMESSER, nicht die halbe Teilung:
+    # mit der halben Teilung (4,76 mm) blieben Rollen von 6,35 mm Dicke
+    # stellenweise ineinander stecken.
+    mindest = max(float(rollen_d) * 1.02, teilung * 0.5)
     gefiltert = []
     for p in bahn:
-        if all(p.distanceToPoint(q) > teilung * 0.5 for q in gefiltert):
+        if all(p.distanceToPoint(q) > mindest for q in gefiltert):
             gefiltert.append(p)
     if len(gefiltert) > 1 and \
-            gefiltert[0].distanceToPoint(gefiltert[-1]) < teilung * 0.5:
+            gefiltert[0].distanceToPoint(gefiltert[-1]) < mindest:
         gefiltert.pop()
 
     rollen = []

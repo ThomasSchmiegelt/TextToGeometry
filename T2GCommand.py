@@ -5803,6 +5803,104 @@ class T2GGetriebeCommand(_MakroCommand):
         return GF.baue_mit_werkstoff(doc=doc, **werte)
 
 
+class T2GKurbeltriebCommand(_MakroCommand):
+    """Ein vollständiger Kurbeltrieb, R2 bis V12."""
+
+    titel = "Kurbeltrieb"
+    kennung = "kurbeltrieb"
+
+    def GetResources(self) -> dict:
+        return {
+            "MenuText": "Kurbeltrieb bauen …",
+            "ToolTip": "Kolben, Pleuel, Kurbelwelle, Nockenwellen, Ventile "
+                       "mit Federn, Tassenstößel mit HVA und Steuertrieb — "
+                       "R2 bis V12",
+            "Pixmap": _icon("t2g-kurbeltrieb.svg"),
+        }
+
+    def felder(self, M):
+        import kt_bauformen as KB
+        import kt_steuertrieb as KS
+        return [
+            M.Feld("bauform", "Bauform", "", "R4", auswahl=list(KB.namen()),
+                   gruppe="Motor",
+                   hinweis="R = Reihe, V = V-Motor mit dem üblichen "
+                           "Bankwinkel"),
+            M.Feld("bohrung", "Bohrung", "mm", 86.0, 30.0, 200.0,
+                   gruppe="Motor"),
+            M.Feld("hub", "Hub", "mm", 86.0, 20.0, 200.0, gruppe="Motor"),
+            M.Feld("stichmass", "Pleuelstichmaß", "mm", 0.0, 0.0, 600.0,
+                   gruppe="Motor", hinweis="0 = 1,75 · Hub vorschlagen"),
+            M.Feld("kompressionshoehe", "Kompressionshöhe", "mm", 32.0, 10.0,
+                   120.0, gruppe="Motor",
+                   hinweis="Bolzenmitte bis Kolbenboden"),
+            M.Feld("zylinderabstand", "Zylinderabstand", "mm", 0.0, 0.0,
+                   400.0, gruppe="Motor", hinweis="0 = 1,18 · Bohrung"),
+
+            M.Feld("ventile_je_zylinder", "Ventile je Zylinder", "Stk", 4, 2,
+                   4, gruppe="Ventiltrieb"),
+            M.Feld("ventilhub", "Ventilhub", "mm", 10.0, 2.0, 20.0,
+                   gruppe="Ventiltrieb"),
+            M.Feld("spreizung", "Spreizung", "Grad", 110.0, 80.0, 140.0,
+                   gruppe="Ventiltrieb",
+                   hinweis="Nockenscheitel nach OT – hält Ventil und Kolben "
+                           "auseinander"),
+            M.Feld("steuertrieb", "Steuertrieb", "", "kette",
+                   auswahl=list(KS.ARTEN), gruppe="Ventiltrieb"),
+            M.Feld("zaehne_kurbel", "Zähne am Kurbelrad", "Stk", 20, 9, 60,
+                   gruppe="Ventiltrieb",
+                   hinweis="Das Nockenrad bekommt das Doppelte – 2:1"),
+
+            M.Feld("bolzen_d", "Kolbenbolzen", "mm", 22.0, 8.0, 60.0,
+                   gruppe="Wellen"),
+            M.Feld("hubzapfen_d", "Hubzapfen", "mm", 48.0, 15.0, 120.0,
+                   gruppe="Wellen"),
+            M.Feld("hauptlager_d", "Hauptlager", "mm", 54.0, 15.0, 140.0,
+                   gruppe="Wellen"),
+
+            M.Feld("mit_ventiltrieb", "Ventiltrieb bauen", "", "ja",
+                   auswahl=["ja", "nein"], gruppe="Umfang"),
+            M.Feld("mit_getriebe", "Getriebe anflanschen", "", "nein",
+                   auswahl=["nein", "ja"], gruppe="Umfang",
+                   hinweis="Setzt das Getriebe an den Schwungradflansch"),
+            M.Feld("getriebe_gaenge", "Gänge des Getriebes", "Stk", 5, 1, 8,
+                   gruppe="Umfang"),
+        ]
+
+    def bauen(self, doc, werte):
+        import kt_motor as KM
+        import werkstoff as W
+
+        w = dict(werte)
+        w["mit_ventiltrieb"] = (w.pop("mit_ventiltrieb", "ja") == "ja")
+        w["mit_getriebe"] = (w.pop("mit_getriebe", "nein") == "ja")
+        k = KM.kennwerte(**w)
+        FreeCAD.Console.PrintMessage(
+            "Kurbeltrieb %s: %d Zylinder, %.0f cm^3, Blockhöhe %.1f mm, "
+            "Zündfolge %s\n"
+            % (k["bauform"], k["zylinder"], k["hubraum_cm3"],
+               k["blockhoehe"], "-".join(str(x) for x in k["zuendfolge"])))
+        teile, kenn, proben = KM.baue(doc=doc, **w)
+        objekte = []
+        for label, shp in teile:
+            o = doc.addObject("Part::Feature", "Bauteil")
+            o.Shape = shp
+            o.Label = label
+            objekte.append(o)
+        doc.recompute()
+        schlecht = [t for ok, t in KM.pruefe(
+            [(o.Label, o.Shape) for o in objekte
+             if not o.Label.startswith("Getriebe:")], proben, kenn)
+            if not ok]
+        if schlecht:
+            FreeCAD.Console.PrintWarning(
+                "Kurbeltrieb: %s\n" % "; ".join(schlecht))
+        else:
+            FreeCAD.Console.PrintMessage(
+                "Kurbeltrieb: alle Zusagen eingehalten\n")
+        return objekte, W.zuweisen(objekte, "stahl")
+
+
 class T2GLagerCommand(_MakroCommand):
     """Ein Rillenkugellager nach DIN 625-1."""
 
@@ -5952,3 +6050,4 @@ FreeCADGui.addCommand("T2G_ApiTest", T2GApiTestCommand())
 FreeCADGui.addCommand("T2G_Getriebe", T2GGetriebeCommand())
 FreeCADGui.addCommand("T2G_Lager", T2GLagerCommand())
 FreeCADGui.addCommand("T2G_Gehaeuse", T2GGehaeuseCommand())
+FreeCADGui.addCommand("T2G_Kurbeltrieb", T2GKurbeltriebCommand())

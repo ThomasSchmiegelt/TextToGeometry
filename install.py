@@ -34,6 +34,7 @@ FILES = [
     "test_core.py", "test_ext.py", "test_skills.py", "test_chat.py",
     "test_learn.py", "test_project.py", "test_agent.py",
     "test_tools.py", "test_bauen.py", "test_getriebe_makro.py",
+    "test_kurbeltrieb.py",
 ]
 DIRS = ["Resources", "Skills", "Tools", "Macros"]
 

@@ -28,6 +28,7 @@ python3 test_agent.py   # 24 tests: agent protocol, action registry, run budget
 FreeCADCmd test_skills.py   # skills engine — needs the REAL Part module (see gotcha)
 FreeCADCmd test_bauen.py    # 32 checks: placement, replace, collisions, bearing, tools
 FreeCADCmd test_getriebe_makro.py  # 32 checks: mask, DIN 625, housing, FCGear
+FreeCADCmd test_kurbeltrieb.py     # 25 checks: parts, docking, R2…V12 (T2G_TEST_LANG=1 for all ten)
 FreeCADCmd Beispiele/getriebe_5gang.py   # reference gearbox; exits 1 if a promise breaks
 FreeCADCmd test_bauen.py    # 24 checks: placement, replace, collisions, bearing, mesh phase
 FreeCADCmd Beispiele/getriebe_5gang.py   # reference gearbox; exits 1 if a promise breaks
@@ -403,6 +404,48 @@ logs into the panel. Deliberately **not** threaded: the mask is modal and the
 build takes seconds, so a worker would only risk creating geometry off the GUI
 thread. The `.FCMacro` files stay — they are what works in a FreeCAD without
 this workbench.
+
+### The crank-drive generator: interfaces, not coordinates
+
+`Tools/kt_*.py` — one script per part, as asked. The point of the whole thing
+is `kt_schnittstelle.py`: every part returns its bodies **and** its connection
+points (position, axis, kind, size), and the assembly docks them instead of
+computing coordinates. `andocke()` moves bodies and points together, which is
+why the interfaces still hold afterwards, and `pruefe_paarung()` measures that
+two points really coincide.
+
+`kt_bauformen.py` holds the engine knowledge for R2…V12. Crank pin angles and
+firing orders are **tables, not formulas**: there is no consistent rule (an I6
+is mirror-symmetric for balance, a flat-plane V8 is deliberately uneven at
+0-180-180-0, a cross-plane one spans two planes), and deriving the firing order
+from the crank gave 1-4-2-3 for an I4 instead of the usual 1-3-4-2 — correctly
+computed, but nobody builds it that way. Only the split-pin offset is derived
+(`|720/z − bank|`), and the 90° V6 cross-check returns the known 30°.
+
+**An interface check is not enough on its own.** The crank pins were declared
+with axis `(0,1,0)` while the pins run along X. The con-rod docked sideways and
+lay in the crankshaft plane — 62 mm along the shaft instead of 22 — and the
+pairing check said nothing, because both sides were consistently wrong. Only
+the interference measurement caught it. The crankshaft selftest now checks the
+axis.
+
+Two findings were not model errors but engine design, and both are worth
+keeping in mind when something looks like interference:
+- Piston at TDC with the inlet valve fully open, 51.7 % interference. That is
+  exactly why **valve timing spread** exists — the lobe centre sits ~110° after
+  TDC, not at TDC.
+- After that, 19.7 % between piston and exhaust valve: **valve overlap** at TDC.
+  That is what **valve pockets** are for. With them, 1.1 %.
+
+Three silent arithmetic traps: `Vector.multiply()` scales **in place** (the
+valves flew off in powers of ten — 2e5, 1.8e8, 1.65e11); the cam pushes when
+its tip points **down**, so the lift was 180° out; and for a **flat follower**
+the lift is the largest projection of the lobe profile onto the follower
+direction, not the radial distance — the contact point walks sideways.
+
+The engine and the gearbox share one axis in the standard orientation, so
+`mit_getriebe=True` needs only a translation: the R4 ends at x = 346 and the
+gearbox starts at x = 346.
 
 ### Fits, and why they matter to the checks
 

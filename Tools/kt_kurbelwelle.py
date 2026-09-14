@@ -76,7 +76,9 @@ def baue(bauform="R4", hub=86.0, zylinderabstand=91.0, hauptlager_d=54.0,
     abstand = float(zylinderabstand)
     r_haupt = float(hauptlager_d) / 2.0
     r_hub = float(hubzapfen_d) / 2.0
-    wb = float(wange_b) or (r + r_hub + 6.0) * 2.0
+    # Die Wange muss den Hubzapfen tragen, mehr nicht. Mit 6 mm Ueberstand
+    # streifte das Gegengewicht beim V10 die Kolbenschuerze (2,2 %).
+    wb = float(wange_b) or (r + r_hub + 2.0) * 2.0
 
     if r_haupt <= 0 or r_hub <= 0:
         raise ValueError("Zapfendurchmesser muessen positiv sein.")

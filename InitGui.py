@@ -45,6 +45,7 @@ class T2GWorkbench(Workbench):
             "T2G_SkillLearn",
             "T2G_SkillDesign",
             "Separator",
+            "T2G_Kurbeltrieb",
             "T2G_Getriebe",
             "T2G_Lager",
             "T2G_Gehaeuse",
@@ -67,6 +68,7 @@ class T2GWorkbench(Workbench):
         # Die Konstruktionsbefehle bekommen ein eigenes Untermenü: sie bauen
         # deterministisch aus Normdaten, ohne Sprachmodell.
         self.appendMenu(["TextToGeometry", "Konstruktion"], [
+            "T2G_Kurbeltrieb",
             "T2G_Getriebe",
             "T2G_Lager",
             "T2G_Gehaeuse",
