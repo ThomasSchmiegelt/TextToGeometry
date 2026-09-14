@@ -109,16 +109,48 @@ FreeCAD.closeDocument(wieder.Name)
 # --- 4: Konturgehaeuse ---------------------------------------------------
 log("\n--- Geteiltes Konturgehaeuse ---")
 log("     " + GK.selbsttest())
-teile = GK.baue([(0.0, 0.0), (0.0, 52.0)], [18.0, 34.0], breite=50.0,
-                luft=3.0, wand=4.0, wellen_d=47.0, achse="z")
+# Gestuft: Lagersitz, drei ungleiche Radpaare, Lagersitz.
+sitz_r = 23.5
+abschnitte = [(14.0, [sitz_r, sitz_r]),
+              (18.0, [17.0, 41.0]),
+              (18.0, [21.0, 37.0]),
+              (18.0, [25.0, 33.0]),
+              (14.0, [sitz_r, sitz_r])]
+teile = GK.baue([(0.0, 0.0), (0.0, 48.0)], abschnitte=abschnitte, wand=4.0,
+                welle_d=20.4, achse="z")
 pruefe(len(teile) == 2, "Ober- und Unterteil (%d)" % len(teile))
 oben, unten = teile[0][1], teile[1][1]
 pruefe(abs(oben.Volume - unten.Volume) < 0.02 * (oben.Volume + unten.Volume),
        "haelftig geteilt (%.0f gegen %.0f mm^3)" % (oben.Volume, unten.Volume))
 pruefe(oben.common(unten).Volume < 1.0, "die Haelften ueberlappen nicht")
-# Der Durchbruch muss die Welle durchlassen.
-welle = Part.makeCylinder(20.0, 200.0, FreeCAD.Vector(0, 52.0, -50.0))
 ganz = oben.fuse(unten)
+bo, bu = oben.BoundBox, unten.BoundBox
+pruefe((bo.XMax <= 0.01 and bu.XMin >= -0.01)
+       or (bu.XMax <= 0.01 and bo.XMin >= -0.01),
+       "die Haelften liegen auf verschiedenen Seiten der Trennebene")
+
+
+def quer_bei(z):
+    """Quer zur Achsverbindung — längs davon liegt der Flansch."""
+    ebene = Part.makeBox(600.0, 600.0, 0.5,
+                         FreeCAD.Vector(-300.0, -300.0, z))
+    t = ganz.common(ebene)
+    return t.BoundBox.XLength if t.Solids else 0.0
+
+
+eng, weit = quer_bei(5.0), quer_bei(25.0)
+pruefe(weit - eng > 2.0,
+       "die Wand folgt den Raedern (%.0f mm am Lager, %.0f mm am Rad)"
+       % (eng, weit))
+# Um den Lagersitz muss Material stehen, im Sitz selbst keines.
+lager = Part.makeCylinder(sitz_r, 14.0, FreeCAD.Vector(0, 48.0, 0.0))
+pruefe(ganz.common(lager).Volume < 1.0, "der Lagersitz ist frei fuer das Lager")
+huelle = Part.makeCylinder(sitz_r + 3.5, 12.0, FreeCAD.Vector(0, 48.0, 1.0))
+pruefe(ganz.common(huelle).Volume > 100.0,
+       "um den Lagersitz steht Material (%.0f mm^3)"
+       % ganz.common(huelle).Volume)
+# Der Durchbruch muss die Welle durchlassen.
+welle = Part.makeCylinder(10.0, 300.0, FreeCAD.Vector(0, 48.0, -100.0))
 pruefe(ganz.common(welle).Volume < 1.0,
        "der Wellendurchbruch laesst die Welle durch")
 
@@ -161,6 +193,14 @@ if hat_fcgear:
            "vier Schaltmuffen zwischen den Losraedern")
     pruefe(sum(1 for n in namen if n.startswith("Gehaeuse")) == 2,
            "Gehaeuse ist geteilt")
+    # Die Lager muessen IM Gehaeuse sitzen, nicht davor in der Luft: im
+    # ersten Wurf lagen sie bei x -23..-9, das Gehaeuse bei -7..103.
+    gh = [s for n, s in teile if n.startswith("Gehaeuse")]
+    huelle = gh[0].fuse(gh[1]).BoundBox
+    lagerteile = [s for n, s in teile if n[:1].isdigit()]
+    pruefe(all(huelle.XMin <= s.BoundBox.XMin and huelle.XMax >= s.BoundBox.XMax
+               for s in lagerteile),
+           "alle %d Lagerteile liegen im Gehaeuse" % len(lagerteile))
     FreeCAD.closeDocument(doc.Name)
 
 log("\nFEHLER: %d" % len(FEHLER))

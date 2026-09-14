@@ -27,7 +27,7 @@ python3 test_project.py # 61 tests: project layout, AHP maths, matching, params,
 python3 test_agent.py   # 24 tests: agent protocol, action registry, run budget
 FreeCADCmd test_skills.py   # skills engine — needs the REAL Part module (see gotcha)
 FreeCADCmd test_bauen.py    # 32 checks: placement, replace, collisions, bearing, tools
-FreeCADCmd test_getriebe_makro.py  # 24 checks: mask, DIN 625, housing, FCGear
+FreeCADCmd test_getriebe_makro.py  # 32 checks: mask, DIN 625, housing, FCGear
 FreeCADCmd Beispiele/getriebe_5gang.py   # reference gearbox; exits 1 if a promise breaks
 FreeCADCmd test_bauen.py    # 24 checks: placement, replace, collisions, bearing, mesh phase
 FreeCADCmd Beispiele/getriebe_5gang.py   # reference gearbox; exits 1 if a promise breaks
@@ -349,12 +349,32 @@ are thin starters, because a macro gets no arguments and returns nothing
   runtime is gone after reopening. The module writes the card into the user
   library (which sits at `v1-1/Material`, not `FreeCAD/Material`) and falls
   back to `CalculiX-Steel` audibly, never silently.
-- `Tools/gehaeuse_kontur.py` — the wall follows the gear contour. Split in the
-  plane **through both shaft axes**, not midway between them: that one is
-  skew, does not halve the bearing seats, and split 220973 against 66158 mm³.
-  The flange runs along the shaft; its bolts sit on the two ears at the real
-  ends of the contour, not symmetric about the first axis, or one of them cuts
-  air. `baue()` counts how many holes hit material.
+- `Tools/gehaeuse_kontur.py` — the wall follows the gear contour, **section by
+  section**: `abschnitte=[(laenge, [r_innen je Achse]), …]` with final inner
+  radii. One section gives two cylinders, which is exactly what the first
+  housing looked like. Measured on a five-speed box, the housing now steps
+  90 → 86 → 82 → 78 → 74 mm across the gears and narrows to 55 mm at the
+  bearing seats. Split in the plane **through both shaft axes**, not midway
+  between them: that one is skew, does not halve the bearing seats, and split
+  220973 against 66158 mm³. The flange runs along the shaft; its bolts sit on
+  the two ears, and `baue()` counts how many holes hit material.
+
+  Sections are built from **3D primitives** (cylinders plus a bridge box),
+  not from a 2D contour offset and extruded. Three OCC failures forced that,
+  and each one is silent:
+  - `removeSplitter()` ate a body: 133775 mm³ became 11762 at five sections,
+    while seven sections of the same kind were untouched. `_verfeinern()` keeps
+    the refined shape only if the volume survives.
+  - `common()` against the half-space returned an empty shape (0 solids,
+    infinite bounding box) where `cut()` worked, so the split uses two cuts.
+  - Two circles that do not touch (23.5 mm at 48 mm centres, the bearing seat)
+    leave the contour in two pieces, and `max(Wires, key=Length)` silently took
+    one: 6335 mm³ of wall around one bearing, 656 around the other. `_steg()`
+    bridges them — and its winding matters, a face with normal −Z fuses into
+    five faces instead of one, at identical area.
+
+  Shaft bores are cut **after** the flange is fused on, or the collar fills
+  them in again and the shaft sits inside the end wall.
 - `Tools/getriebe_fcgear.py` — real involute gears, idlers and shift sleeves.
 
 Two facts that cost a measurement each: the idler needs **half a tooth pitch**

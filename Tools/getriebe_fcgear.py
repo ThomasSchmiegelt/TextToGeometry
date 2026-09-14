@@ -184,9 +184,18 @@ def baue(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
         teile.append((label, s))
 
     # --- Zahnräder -------------------------------------------------------
-    kopf_ein, kopf_aus = 0.0, 0.0
+    # Aufbau in Innenraum-Koordinaten: x = 0 ist der Anfang des Hohlraums.
+    #   [0 .. lager_b]        Lagersitz
+    #   danach je Gang ein Abschnitt aus Rad + Luft
+    #   [... .. innen_l]      Lagersitz
+    # Der Lagersitz braucht diese Länge, sonst hängt das Lager in der Luft —
+    # im ersten Wurf sass es bei x -23..-9 und beruehrte das Gehaeuse mit
+    # 0 mm^3.
+    sitz_r = lm["D"] / 2.0
+    vorlauf = lm["B"]
+    abschnitte = [(vorlauf, [sitz_r, sitz_r])]
     for k, (z1, z2, i) in enumerate(paare):
-        x = float(gehaeuse_luft) + luft / 2.0 + k * schritt
+        x = vorlauf + k * schritt + luft / 2.0
         fest, d_w1, d_a1 = zahnrad(doc, z1, modul, breite, welle_d,
                                    verzahnung, schraegwinkel,
                                    eingriffswinkel, flankenspiel)
@@ -198,24 +207,27 @@ def baue(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
                                   welle_d + 2.0 * spiel, verzahnung,
                                   -float(schraegwinkel), eingriffswinkel,
                                   flankenspiel)
-        kopf_ein = max(kopf_ein, d_a1 / 2.0)
-        kopf_aus = max(kopf_aus, d_a2 / 2.0)
         # Das Losrad um eine halbe Zahnteilung verdreht, sonst stossen die
         # Zaehne aufeinander statt ineinander zu greifen: ohne Phase
         # durchdringen sich Gang 1 um 11,8 % des kleineren Rades.
         lege_ab(fest, "Gang %d Festrad (z=%d)" % (k + 1, z1), (x, 0.0, 0.0))
         lege_ab(los, "Gang %d Losrad (z=%d, i=%.3f)" % (k + 1, z2, i),
                 (x, a, 0.0), phase=180.0 / float(z2))
-
-    baulaenge = schritt * gaenge + luft
-    innen_l = baulaenge + 2.0 * float(gehaeuse_luft)
+        # Dieser Abschnitt der Gehäusewand folgt genau diesem Radpaar.
+        abschnitte.append((schritt, [d_a1 / 2.0 + float(gehaeuse_luft),
+                                     d_a2 / 2.0 + float(gehaeuse_luft)]))
+    abschnitte.append((vorlauf, [sitz_r, sitz_r]))
+    innen_l = sum(l for l, _rs in abschnitte)
 
     # --- Wellen ----------------------------------------------------------
-    sitz_l = lm["B"] + 2.0
-    welle_l = innen_l + 2.0 * wand + 2.0 * (lm["B"] + 6.0)
-    x0 = -(wand + lm["B"] + 6.0)
+    ueberstand = 8.0
+    welle_l = innen_l + 2.0 * wand + 2.0 * ueberstand
+    x_welle = -(wand + ueberstand)
+    # Der abgesetzte Sitz muss bis unter das Lager reichen.
+    sitz_l = wand + ueberstand + lm["B"]
     for label, y in (("Eingangswelle", 0.0), ("Ausgangswelle", a)):
-        lege_ab(_welle(welle_l, welle_d, sitz_d, sitz_l), label, (x0, y, 0.0))
+        lege_ab(_welle(welle_l, welle_d, lm["d"], sitz_l), label,
+                (x_welle, y, 0.0))
 
     # --- Schaltmuffen zwischen je zwei Losrädern -------------------------
     # Die Muffe muss in die Lücke passen, sonst steckt sie in den Rädern:
@@ -224,29 +236,24 @@ def baue(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
     breite_muffe = float(muffe_b) if float(muffe_b) > 0.0 else platz
     breite_muffe = max(2.0, min(breite_muffe, platz))
     for k in range(gaenge - 1):
-        x = (float(gehaeuse_luft) + luft / 2.0 + k * schritt + breite
+        x = (vorlauf + k * schritt + luft / 2.0 + breite
              + (luft - breite_muffe) / 2.0)
         lege_ab(_schaltmuffe(welle_d + 2.0 * spiel, welle_d + 12.0,
                              breite_muffe),
                 "Schaltmuffe %d/%d" % (k + 1, k + 2), (x, a, 0.0))
 
-    # --- Lager auf den abgesetzten Sitzen --------------------------------
-    rand = (sitz_l - lm["B"]) / 2.0
-    for seite, x in (("links", x0 + rand),
-                     ("rechts", x0 + welle_l - sitz_l + rand)):
+    # --- Lager IM Gehäusesitz --------------------------------------------
+    for seite, x in (("links", 0.0), ("rechts", innen_l - lm["B"])):
         for welle, y in (("Eingang", 0.0), ("Ausgang", a)):
             for label, shp in LG.baue(lager_name, spiel=spiel, achse="x",
                                       x=x, y=y, z=0.0):
                 teile.append(("%s %s %s" % (label, welle, seite), shp))
 
     # --- Gehäuse ---------------------------------------------------------
-    for label, shp in GK.baue([(0.0, 0.0), (0.0, a)],
-                              [kopf_ein, kopf_aus],
-                              breite=innen_l, luft=float(gehaeuse_luft),
+    for label, shp in GK.baue([(0.0, 0.0), (0.0, a)], abschnitte=abschnitte,
                               wand=wand, flansch_b=flansch_b,
                               schraube_d=schraube_d,
-                              wellen_d=lm["D"] + 0.4, achse="x",
-                              x0=-float(gehaeuse_luft)):
+                              welle_d=welle_d + 2.0 * spiel, achse="x"):
         teile.append((label, shp))
 
     return teile

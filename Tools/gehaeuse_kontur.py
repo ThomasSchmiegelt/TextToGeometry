@@ -80,6 +80,21 @@ def trennebene(achsen):
     return p1, d, Vector(-d.y, d.x, 0)
 
 
+def _mass(shape, reserve=20.0):
+    """Eine Kantenlänge, die den Körper sicher umschließt.
+
+    Mit einem festen 4000-mm-Klotz zu schneiden hat OCC an manchen Formen
+    fehlschlagen lassen: bei einem Gehäuse aus fünf Abschnitten kamen beide
+    Hälften auf derselben Seite heraus. Ein Schnittkörper in der Größe des
+    Werkstücks ist numerisch gutmütiger.
+    """
+    try:
+        b = shape.BoundBox
+        return max(b.XLength, b.YLength, b.ZLength) * 2.0 + float(reserve)
+    except Exception:  # noqa: BLE001
+        return 4000.0
+
+
 def _block(punkt, d, z0, hoehe, dicke=None, gross=4000.0):
     """Halbraum (``dicke=None``) oder Scheibe an der Trennebene."""
     if dicke is None:
@@ -107,68 +122,205 @@ def bohrpunkte(laenge, schraube_d, mindestens=2):
     return [schritt * (k + 0.5) for k in range(anzahl)]
 
 
-def baue(achsen, radien, breite=60.0, luft=3.0, wand=4.0, flansch_b=12.0,
-         schraube_d=6.0, wellen_d=0.0, x0=0.0, achse="x"):
+def _verfeinern(shape):
+    """``removeSplitter()``, aber nur wenn es das Volumen nicht auffrisst.
+
+    Gemessen an einem Gehäuse aus fünf Abschnitten: der Schnitt ergibt
+    133775 mm³, nach ``removeSplitter()`` sind es 11762 — der Körper ist weg,
+    ohne Fehlermeldung, und übrig bleibt der Flansch. Bei sieben Abschnitten
+    derselben Bauart passiert nichts dergleichen. Die Vereinfachung ist also
+    nicht verlässlich; sie ist Kosmetik und darf nichts kosten.
+    """
+    try:
+        vorher = float(shape.Volume or 0.0)
+        verfeinert = shape.removeSplitter()
+        nachher = float(verfeinert.Volume or 0.0)
+    except Exception:  # noqa: BLE001
+        return shape
+    if vorher > 0.0 and abs(nachher - vorher) > 1e-3 * vorher:
+        return shape
+    return verfeinert
+
+
+def _steg(p1, p2, halbbreite):
+    """Ein Verbindungsband zwischen zwei Achsen, als Rechteckfläche."""
+    d = p2.sub(p1)
+    laenge = d.Length
+    if laenge < 1e-9 or halbbreite <= 0.0:
+        return None
+    d.normalize()
+    q = Vector(-d.y, d.x, 0)
+    ecken = [p1.add(Vector(q.x * halbbreite, q.y * halbbreite, 0)),
+             p2.add(Vector(q.x * halbbreite, q.y * halbbreite, 0)),
+             p2.sub(Vector(q.x * halbbreite, q.y * halbbreite, 0)),
+             p1.sub(Vector(q.x * halbbreite, q.y * halbbreite, 0))]
+    flaeche = Part.Face(Part.makePolygon(ecken + [ecken[0]]))
+    # Die Umlaufrichtung entscheidet. Gemessen: mit Normale -Z liefert die
+    # Vereinigung mit den Kreisen 5 Flaechen statt einer -- bei exakt gleichem
+    # Flaecheninhalt. Danach nimmt max(Wires, key=Length) den falschen Umriss.
+    try:
+        if flaeche.normalAt(0, 0).z < 0:
+            flaeche.reverse()
+    except Exception:  # noqa: BLE001
+        pass
+    return flaeche
+
+
+def _kontur(achsen, radien):
+    """Eine Schnittfläche aus einem Kreis je Achse, bei Bedarf mit Steg.
+
+    Berühren sich zwei Kreise nicht, zerfällt die Fläche — im Lagersitz sind
+    es zwei Kreise von 23,5 mm bei 48 mm Achsabstand. Das blieb unbemerkt,
+    weil der Aufrufer mit ``max(Wires, key=Length)`` stillschweigend einen der
+    beiden nahm: um das eine Lager standen 6335 mm³ Wand, um das andere 656.
+    Dann wird ein Steg eingezogen, so wie eine echte Gehäusewand die beiden
+    Lageraugen verbindet.
+
+    Vereint wird alles in EINEM ``multiFuse``. Kreise erst zu verschmelzen,
+    ``removeSplitter`` zu rufen und den Steg danach anzufügen, hat die Fläche
+    in fünf Stücke zerlegt.
+    """
+    punkte = [Vector(float(a), float(b), 0) for a, b in achsen]
+    radien = [float(r) for r in radien]
+    stuecke = [Part.Face(Part.Wire(Part.makeCircle(r, p)))
+               for p, r in zip(punkte, radien)]
+    for i in range(len(punkte) - 1):
+        abstand = punkte[i].distanceToPoint(punkte[i + 1])
+        if abstand < radien[i] + radien[i + 1] - 1e-6:
+            continue                      # die Kreise überlappen schon
+        steg = _steg(punkte[i], punkte[i + 1],
+                     min(radien[i], radien[i + 1]) * 0.7)
+        if steg is not None:
+            stuecke.append(steg)
+    f = stuecke[0] if len(stuecke) == 1 else stuecke[0].multiFuse(stuecke[1:])
+    f = f.removeSplitter()
+    if len(f.Faces) > 1:
+        raise GehaeuseFehler(
+            "Die Kontur zerfaellt in %d Teile — die Wellen liegen zu weit "
+            "auseinander fuer die angegebenen Radien." % len(f.Faces))
+    return f
+
+
+def _abschnitt_koerper(achsen, radien, z0, z1, zuschlag=0.0):
+    """Ein Abschnitt als 3D-Körper: ein Zylinder je Achse, dazu der Steg.
+
+    Bewusst aus Grundkörpern statt aus einer 2D-Kontur mit ``makeOffset2D``:
+    Die Kette aus Offset, vielen Prismen und Booleschen Operationen ist in
+    OCC brüchig — bei fünf Abschnitten kam ein halbes Gehäuse heraus, bei
+    sieben derselben Bauart nicht. Zylinder und Quader zu vereinen ist
+    verlässlich. Der Preis ist eine Kante statt einer tangentialen Rundung
+    dort, wo die beiden Kreise zusammenlaufen.
+    """
+    hoehe = float(z1) - float(z0)
+    punkte = [Vector(float(ya), float(za), float(z0)) for ya, za in achsen]
+    stuecke = [Part.makeCylinder(float(r) + float(zuschlag), hoehe, p)
+               for p, r in zip(punkte, radien)]
+    for i in range(len(punkte) - 1):
+        r1 = float(radien[i]) + float(zuschlag)
+        r2 = float(radien[i + 1]) + float(zuschlag)
+        halb = min(r1, r2) * 0.7
+        steg = _steg(Vector(punkte[i].x, punkte[i].y, 0),
+                     Vector(punkte[i + 1].x, punkte[i + 1].y, 0), halb)
+        if steg is None:
+            continue
+        k = steg.extrude(Vector(0, 0, hoehe))
+        k.translate(Vector(0, 0, float(z0)))
+        stuecke.append(k)
+    if len(stuecke) == 1:
+        return stuecke[0]
+    return stuecke[0].multiFuse(stuecke[1:])
+
+
+def baue(achsen, radien=None, abschnitte=None, breite=60.0, luft=3.0,
+         wand=4.0, flansch_b=12.0, schraube_d=6.0, welle_d=0.0, x0=0.0,
+         achse="x"):
     """Gehäuseober- und -unterteil als (Bezeichnung, Shape)-Paare.
 
-    achsen      Liste von (y, z) der Radachsen in der Radebene [mm]
-    radien      Kopfradien der größten Räder je Achse [mm]
-    breite      axiale Länge des Innenraums [mm]
-    luft        Freigang Rad -> Innenwand [mm]
+    achsen      Liste von (a, b) der Wellenachsen in der Querschnittsebene
+    abschnitte  Liste von (laenge, [r_innen je Achse]) in Wellenrichtung.
+                Die Radien sind ENDGÜLTIGE Innenradien, Freigang schon darin.
+                Damit folgt die Wand jedem Radpaar einzeln — mit nur einem
+                Abschnitt kämen zwei Zylinder heraus, und genau so sah das
+                erste Gehäuse aus.
+    radien      Altform: ein Radius je Achse, ergibt EINEN Abschnitt der
+                Länge ``breite``; ``luft`` wird dann noch addiert.
     wand        Wandstärke [mm]
     flansch_b   Breite des Flansches am Trennstoß [mm]
     schraube_d  Durchgangsbohrung im Flansch [mm]
-    wellen_d    Durchbruch in den Stirnwänden je Achse [mm]; 0 = keiner.
-                Sinnvoll ist der Lageraußendurchmesser — dann sitzt das Lager
-                im Gehäuse, und die Welle steckt nicht in der Wand.
+    welle_d     Durchlass für die Welle in den Stirnwänden [mm]; 0 = keiner
     achse       Richtung der Wellen: "x" (Vorgabe), "y" oder "z"
+
+    Der Innenraum beginnt bei z = 0 und endet bei der Summe der Abschnitte;
+    die Stirnwände liegen davor und dahinter.
     """
-    breite, luft, wand = float(breite), float(luft), float(wand)
+    wand = float(wand)
     flansch_b, schraube_d = float(flansch_b), float(schraube_d)
 
-    innen = innenkontur(achsen, radien, luft)
-    aussen_w = _aussenkontur(innen, wand)
-    aussen_f = Part.Face(aussen_w)
+    if abschnitte is None:
+        if radien is None:
+            raise GehaeuseFehler("Weder abschnitte noch radien angegeben.")
+        abschnitte = [(float(breite),
+                       [float(r) + float(luft) for r in radien])]
+    abschnitte = [(float(l), [float(r) for r in rs]) for l, rs in abschnitte]
+    if any(len(rs) != len(achsen) for _l, rs in abschnitte):
+        raise GehaeuseFehler("Zu jeder Achse gehört ein Radius je Abschnitt.")
 
-    # Die Wand ist der Ring zwischen außen und innen, plus zwei Stirnwände.
-    ring = aussen_f.cut(innen)
-    mantel = ring.extrude(Vector(0, 0, breite + 2.0 * wand))
-    stirn_a = aussen_f.extrude(Vector(0, 0, wand))
-    stirn_b = aussen_f.copy()
-    stirn_b.translate(Vector(0, 0, breite + wand))
-    stirn_b = stirn_b.extrude(Vector(0, 0, wand))
-    koerper = mantel.fuse(stirn_a).fuse(stirn_b).removeSplitter()
+    laenge = sum(l for l, _rs in abschnitte)
+    gesamt_h = laenge + 2.0 * wand
 
-    # Trennebene: die Ebene durch beide Wellenachsen.
+    aussen_teile, innen_teile = [], []
+    z = 0.0
+    for k, (l, rs) in enumerate(abschnitte):
+        von = z - (wand if k == 0 else 0.0)
+        bis = z + l + (wand if k == len(abschnitte) - 1 else 0.0)
+        aussen_teile.append(_abschnitt_koerper(achsen, rs, von, bis, wand))
+        innen_teile.append(_abschnitt_koerper(achsen, rs, z, z + l))
+        z += l
+
+    aussen = (aussen_teile[0] if len(aussen_teile) == 1
+              else aussen_teile[0].multiFuse(aussen_teile[1:]))
+    hohlraum = (innen_teile[0] if len(innen_teile) == 1
+                else innen_teile[0].multiFuse(innen_teile[1:]))
+    koerper = aussen.cut(hohlraum)
+
+    # Flansch: ein Kragen an der Trennebene, über die Kontur hinaus.
     p0, d, n = trennebene(achsen)
-    gesamt_h = breite + 2.0 * wand
+    groesste = [max(rs[i] for _l, rs in abschnitte) for i in range(len(achsen))]
+    kragen = _abschnitt_koerper(achsen, groesste, -wand, laenge + wand,
+                                wand + flansch_b)
+    scheibe = _block(p0, d, -wand - 1.0, gesamt_h + 2.0, dicke=flansch_b,
+                     gross=_mass(kragen))
+    koerper = koerper.fuse(kragen.common(scheibe).cut(hohlraum))
 
-    # Flansch: eine Scheibe an der Trennebene, seitlich über die Kontur hinaus.
-    flansch_w = aussen_w.makeOffset2D(flansch_b)
-    flansch = Part.Face(flansch_w).cut(innen)
-    scheibe = _block(p0, d, 0.0, gesamt_h, dicke=flansch_b)
-    koerper = koerper.fuse(
-        flansch.extrude(Vector(0, 0, gesamt_h)).common(scheibe))
-    koerper = koerper.removeSplitter()
+    # Wellendurchlass ERST JETZT, nach dem Flansch: vorher hat der Kragen die
+    # eben geschnittenen Loecher wieder zugesetzt, und die Welle steckte in
+    # der Stirnwand (2,7 % Durchdringung). Der Innenraum ist bereits hohl, der
+    # Schnitt trifft also nur die Stirnwaende — und bildet zusammen mit der
+    # Aufweitung des ersten Abschnitts den Lagersitz mit Schulter.
+    if float(welle_d) > 0.0:
+        for (ya, za) in achsen:
+            loch = Part.makeCylinder(float(welle_d) / 2.0, gesamt_h + 2.0,
+                                     Vector(float(ya), float(za), -wand - 1.0))
+            koerper = koerper.cut(loch)
 
-    # Wo enden die Ohren? An den tatsächlichen Enden der Kontur, nicht
-    # symmetrisch um die erste Achse -- bei ungleich großen Rädern liegt die
-    # eine Bohrung sonst im Leeren und schneidet nichts.
-    lagen = [pt.sub(p0).dot(d) for pt in aussen_w.discretize(Number=96)]
-    ohren = (min(lagen) - flansch_b / 2.0, max(lagen) + flansch_b / 2.0)
+    # Die Ohren enden an den tatsächlichen Enden der Kontur, nicht symmetrisch
+    # um die erste Achse — sonst schneidet eine Bohrung ins Leere.
+    ecken = koerper.BoundBox
+    lagen = [Vector(pt[0], pt[1], 0).sub(p0).dot(d)
+             for pt in ((ecken.XMin, ecken.YMin), (ecken.XMin, ecken.YMax),
+                        (ecken.XMax, ecken.YMin), (ecken.XMax, ecken.YMax))]
+    ohren = (min(lagen) + flansch_b / 2.0, max(lagen) - flansch_b / 2.0)
 
-    # Durchgangsbohrungen: längs der Welle verteilt, auf beiden Ohren.
-    # Vector.multiply() skaliert IN PLACE -- jede Richtung frisch bauen, sonst
-    # ist sie nach der ersten Bohrung 2*flansch_b lang.
+    # Vector.multiply() skaliert IN PLACE -- jede Richtung frisch bauen.
     gebohrt = 0
-    for z in bohrpunkte(gesamt_h, schraube_d):
+    for zb in bohrpunkte(gesamt_h, schraube_d):
         for lage in ohren:
             laengs = Vector(d.x, d.y, 0)
             laengs.multiply(lage)
             zurueck = Vector(n.x, n.y, 0)
             zurueck.multiply(-2.0 * flansch_b)
             mitte = p0.add(laengs)
-            start = Vector(mitte.x, mitte.y, z).add(zurueck)
+            start = Vector(mitte.x, mitte.y, zb - wand).add(zurueck)
             bohrung = Part.makeCylinder(schraube_d / 2.0, 4.0 * flansch_b,
                                         start, Vector(n.x, n.y, 0))
             try:
@@ -177,55 +329,49 @@ def baue(achsen, radien, breite=60.0, luft=3.0, wand=4.0, flansch_b=12.0,
                 if vorher - geschnitten.Volume > 1.0:
                     koerper = geschnitten
                     gebohrt += 1
-            except Exception:  # noqa: BLE001 - eine Bohrung weniger ist kein Abbruch
-                continue
-
-    # Wellendurchbrüche in den Stirnwänden — der Innenraum ist ohnehin hohl,
-    # der Schnitt trifft also nur die beiden Stirnwände und bildet zugleich
-    # den Lagersitz.
-    if float(wellen_d) > 0.0:
-        for (ya, za) in achsen:
-            durchbruch = Part.makeCylinder(
-                float(wellen_d) / 2.0, gesamt_h + 2.0,
-                Vector(float(ya), float(za), -1.0))
-            try:
-                koerper = koerper.cut(durchbruch)
             except Exception:  # noqa: BLE001
                 continue
-
-    # Teilen in der Ebene durch die Wellen.
-    halbraum = _block(p0, d, -1.0, gesamt_h + 2.0)
-    oben = koerper.common(halbraum).removeSplitter()
-    unten = koerper.cut(halbraum).removeSplitter()
-
     if gebohrt < 2:
         raise GehaeuseFehler(
             "Nur %d Flanschbohrungen haben Material getroffen — der Flansch "
             "ist zu schmal (flansch_b=%.1f) fuer Schrauben von %.1f mm."
             % (gebohrt, flansch_b, schraube_d))
 
-    teile = [("Gehaeuse Oberteil", oben), ("Gehaeuse Unterteil", unten)]
+    # Teilen in der Ebene durch die Wellen — mit ZWEI Schnitten, nicht mit
+    # Schnitt und Durchschnitt: `common()` gegen den Halbraum lieferte an
+    # manchen Formen einen leeren Koerper, waehrend `cut()` sauber arbeitete.
+    weite = _mass(koerper)
+    unten = koerper.cut(_block(p0, d, -wand - 1.0, gesamt_h + 2.0,
+                               gross=weite))
+    oben = koerper.cut(_block(p0, Vector(-d.x, -d.y, 0), -wand - 1.0,
+                              gesamt_h + 2.0, gross=weite))
+    summe = float(oben.Volume or 0.0) + float(unten.Volume or 0.0)
+    if abs(summe - float(koerper.Volume or 0.0)) > 0.02 * float(
+            koerper.Volume or 1.0):
+        raise GehaeuseFehler(
+            "Die Teilung ist fehlgeschlagen: %.0f + %.0f mm^3 ergeben nicht "
+            "die %.0f mm^3 des ganzen Gehaeuses."
+            % (oben.Volume, unten.Volume, koerper.Volume))
 
     dreh = {"x": (Vector(0, 1, 0), 90.0), "y": (Vector(1, 0, 0), -90.0)}.get(
         str(achse).lower())
     aus = []
-    for label, shp in teile:
-        s = shp.copy()
-        s.translate(Vector(0, 0, -wand))
+    for label, shp in (("Gehaeuse Oberteil", oben),
+                       ("Gehaeuse Unterteil", unten)):
+        sh = shp.copy()
         if dreh is not None:
-            s.rotate(Vector(0, 0, 0), dreh[0], dreh[1])
-        s.translate(Vector(float(x0), 0, 0))
-        aus.append((label, s))
+            sh.rotate(Vector(0, 0, 0), dreh[0], dreh[1])
+        sh.translate(Vector(float(x0), 0, 0))
+        aus.append((label, sh))
     return aus
 
 
 def selbsttest():
     """Prüft die Geometriekette an zwei Wellen mit 48 mm Achsabstand."""
     achsen = [(0.0, 0.0), (0.0, 48.0)]
-    radien = [22.0, 30.0]
-    luft, wand, breite = 3.0, 4.0, 60.0
+    luft, wand = 3.0, 4.0
 
-    innen = innenkontur(achsen, radien, luft)
+    innen = innenkontur(achsen, [22.0, 30.0], luft)
     if len(innen.Wires) != 1:
         raise AssertionError("Innenkontur ergab %d Umrisse statt einem"
                              % len(innen.Wires))
@@ -233,35 +379,56 @@ def selbsttest():
     if aussen.Length <= innen.Wires[0].Length:
         raise AssertionError("Aussenkontur ist nicht laenger als die innere")
 
-    # Ungedreht geprueft (achse="z"): die Kontur liegt dann in der XY-Ebene,
-    # die Wellen laufen entlang Z. Gedreht wird nur zum Schluss, das ist eine
-    # Starrkoerperbewegung und aendert nichts an der Passung.
-    teile = baue(achsen, radien, breite=breite, luft=luft, wand=wand,
+    # Gestuft: Lagersitz, zwei ungleiche Radpaare, Lagersitz.
+    sitz_r = 23.5                      # Lager 6204, halber Aussendurchmesser
+    abschnitte = [(14.0, [sitz_r, sitz_r]),
+                  (20.0, [17.0, 41.0]),
+                  (20.0, [25.0, 33.0]),
+                  (14.0, [sitz_r, sitz_r])]
+    teile = baue(achsen, abschnitte=abschnitte, wand=wand, welle_d=20.4,
                  achse="z")
     if len(teile) != 2:
         raise AssertionError("erwartet Ober- und Unterteil, bekam %d"
                              % len(teile))
-    for name, s in teile:
-        if not s.Solids:
+    for name, sh in teile:
+        if not sh.Solids:
             raise AssertionError("%s ist kein Solid" % name)
     oben, unten = teile[0][1], teile[1][1]
     if oben.common(unten).Volume > 1.0:
         raise AssertionError("Ober- und Unterteil durchdringen sich")
-
     ganz = oben.fuse(unten)
-    bb = ganz.BoundBox
-    # Gleich groß geteilt: die Ebene durch beide Achsen halbiert das Gehäuse.
     if abs(oben.Volume - unten.Volume) > 0.02 * ganz.Volume:
         raise AssertionError("ungleich geteilt: %.0f gegen %.0f mm^3"
                              % (oben.Volume, unten.Volume))
-    if bb.YLength < 2 * max(radien) + 2 * luft:
-        raise AssertionError("Gehaeuse ist schmaler als der Radsatz")
-    # Das groesste Rad sitzt auf der zweiten Achse und muss frei stehen.
-    rad = Part.makeCylinder(radien[1], 10.0, Vector(0.0, 48.0, 5.0))
-    durch = ganz.common(rad).Volume
-    if durch > 1.0:
-        raise AssertionError("das groesste Rad steckt in der Wand (%.0f mm^3)"
-                             % durch)
-    return ("Gehaeuse-Selbsttest bestanden (%.0f + %.0f mm^3, Huelle "
-            "%.0f x %.0f x %.0f)" % (oben.Volume, unten.Volume,
-                                     bb.XLength, bb.YLength, bb.ZLength))
+
+    # Der Querschnitt muss sich ändern — sonst sind es wieder zwei Zylinder.
+    def breite_bei(z):
+        """Quer zur Achsverbindung gemessen — längs davon liegt der Flansch,
+        und dessen Breite ist konstant, sagt also nichts über die Wand aus."""
+        ebene = Part.makeBox(600.0, 600.0, 0.5, Vector(-300.0, -300.0, z))
+        schnitt = ganz.common(ebene)
+        return schnitt.BoundBox.XLength if schnitt.Solids else 0.0
+
+    eng, weit = breite_bei(5.0), breite_bei(25.0)
+    if abs(weit - eng) < 2.0:
+        raise AssertionError(
+            "Querschnitt bleibt gleich (%.1f gegen %.1f mm) — die Wand folgt "
+            "den Raedern nicht" % (eng, weit))
+
+    # Im Lagersitz muss Material um das Lager stehen.
+    lager = Part.makeCylinder(sitz_r, 14.0, Vector(0, 48.0, 0.0))
+    if ganz.common(lager).Volume > 1.0:
+        raise AssertionError("der Lagersitz ist zu eng fuer das Lager")
+    huelle = Part.makeCylinder(sitz_r + wand - 0.5, 12.0,
+                               Vector(0, 48.0, 1.0))
+    if ganz.common(huelle).Volume < 100.0:
+        raise AssertionError("um den Lagersitz steht kein Material")
+
+    # Die Welle muss durch die Stirnwand passen.
+    welle = Part.makeCylinder(10.0, 300.0, Vector(0, 48.0, -100.0))
+    if ganz.common(welle).Volume > 1.0:
+        raise AssertionError("die Welle kommt nicht durch die Stirnwand")
+
+    return ("Gehaeuse-Selbsttest bestanden (%.0f + %.0f mm^3, Querschnitt "
+            "%.0f mm am Lager gegen %.0f mm am Rad)"
+            % (oben.Volume, unten.Volume, eng, weit))
