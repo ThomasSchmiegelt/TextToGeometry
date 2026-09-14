@@ -61,6 +61,10 @@ class ExternalTool:
         kopf = self.label() + (self.signature or "")
         return f"{kopf}: {rest[0] if rest else ''}".rstrip(": ")
 
+    def entry_label(self) -> str:
+        """Short name for what this tool produces, used to label its objects."""
+        return self.entry or self.name.split(".")[-1] or self.name
+
     def to_dict(self) -> dict:
         return asdict(self)
 

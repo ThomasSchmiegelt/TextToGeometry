@@ -15,6 +15,10 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# Vorn einfuegen: der installierte Mod-Ordner steht bereits auf sys.path und
+# enthaelt eine Kopie dieser Datei. Ohne das hier laeuft der Test gegen den
+# zuletzt synchronisierten Stand statt gegen die Quelle -- und meldet
+# froehlich GRUEN zu Code, den es gar nicht ausgefuehrt hat.
 sys.path.insert(0, HERE)
 
 import FreeCAD
@@ -209,6 +213,35 @@ log("     ohne Phase %.1f mm^3, mit halber Teilung %.1f mm^3" % (v_ohne, v_mit))
 pruefe(v_mit < 0.05 * v_ohne,
        "halbe Zahnteilung raeumt den Eingriff frei (%.1f -> %.1f mm^3)"
        % (v_ohne, v_mit))
+
+# --- 7: Werkzeug baut ins Dokument ---------------------------------------
+log("\n--- Werkzeug baut die ganze Baugruppe ---")
+import T2GTools
+FreeCAD.newDocument("Werkzeug")
+p = Panel()
+p._tools = T2GTools.discover_python_tools([os.path.join(HERE, "Tools")])
+werkzeug = T2GTools.find_tool(p._tools, "getriebe.baue")
+pruefe(werkzeug is not None, "getriebe.baue wird als Werkzeug gefunden")
+
+# Ein rechnendes Werkzeug bleibt Text, ein bauendes wird Geometrie.
+rechner = T2GTools.find_tool(p._tools, "getriebe_auslegung.achsabstand")
+r = p.run_external_tool(rechner, "modul=2.0;z1=12;z2=36")
+pruefe("48" in r and "Bauteil" not in r,
+       "Rechenwerkzeug liefert weiter eine Zahl: %s" % r[-40:])
+
+r = p.run_external_tool(werkzeug, "gaenge=5;abstand=3;wand=4")
+log("     %s" % r[:150])
+doc = FreeCAD.ActiveDocument
+gebaut = koerper(doc)
+pruefe(len(gebaut) == 53, "53 Bauteile im Dokument (%d)" % len(gebaut))
+pruefe("ACHTUNG" not in r, "das Werkzeug baut kollisionsfrei")
+pruefe(any("Gang 1 treibend" in o.Label for o in gebaut),
+       "die Bauteile tragen die Namen des Werkzeugs")
+
+# Nochmal aufrufen ersetzt, statt danebenzulegen.
+r = p.run_external_tool(werkzeug, "gaenge=3;abstand=5;wand=6")
+gebaut = koerper(doc)
+pruefe(len(gebaut) == 49, "erneuter Aufruf ersetzt (%d Bauteile)" % len(gebaut))
 
 log("\nFEHLER: %d" % len(FEHLER))
 log("ALLE GRUEN" if not FEHLER else "FEHLGESCHLAGEN")

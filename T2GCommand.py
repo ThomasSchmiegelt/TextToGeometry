@@ -254,6 +254,33 @@ _FEM_MATERIALS = {
 _SIDES = ("xmin", "xmax", "ymin", "ymax", "zmin", "zmax")
 
 
+def _shapes_from_result(ergebnis) -> list:
+    """Recognise geometry in whatever a Python tool returned.
+
+    Accepted: a shape, a list of shapes, or a list of (label, shape) pairs --
+    the last one is what lets a tool name its own parts ("Gang 3 treibend").
+    Anything without a `Volume` and `BoundBox` is a plain result and stays
+    text, so a tool that computes a centre distance keeps working.
+    """
+    def ist_form(x):
+        return hasattr(x, "BoundBox") and hasattr(x, "Volume")
+
+    if ist_form(ergebnis):
+        return [("Teil", ergebnis)]
+    if not isinstance(ergebnis, (list, tuple)) or not ergebnis:
+        return []
+    aus = []
+    for i, eintrag in enumerate(ergebnis):
+        if ist_form(eintrag):
+            aus.append(("Teil %d" % (i + 1), eintrag))
+        elif (isinstance(eintrag, (list, tuple)) and len(eintrag) == 2
+              and ist_form(eintrag[1])):
+            aus.append((str(eintrag[0]), eintrag[1]))
+        else:
+            return []          # gemischt -> kein Geometrieergebnis
+    return aus
+
+
 def _active_doc(create: bool = False):
     doc = FreeCAD.ActiveDocument
     if doc is None and create:
@@ -4784,6 +4811,40 @@ class T2GPanel(QWidget):
         self.tools_status.setText(ergebnis)
         self.log_edit.appendPlainText(ergebnis)
 
+    def _add_tool_shapes(self, tool, formen: list) -> str:
+        """Put a tool's geometry into the document, named as the tool named it.
+
+        A Python tool could compute anything but never build: its return value
+        was stringified and thrown away. A gearbox is deterministic -- the
+        sensible division of labour is that the agent reads the request and
+        operates a script, instead of placing seventeen parts by hand.
+        """
+        doc = FreeCAD.ActiveDocument or FreeCAD.newDocument("T2G")
+        stamm = "T2G %s" % tool.entry_label()
+        for alt in [o for o in doc.Objects
+                    if (getattr(o, "Label", "") or "").startswith(stamm + " ")]:
+            try:
+                doc.removeObject(alt.Name)
+            except Exception:  # noqa: BLE001
+                pass
+        for i, (label, shp) in enumerate(formen):
+            o = doc.addObject("Part::Feature", "T2G_TOOL_%03d" % i)
+            try:
+                o.Shape = shp
+            except Exception:  # noqa: BLE001
+                continue
+            o.Label = "%s · %s" % (stamm, label)
+        doc.recompute()
+        try:
+            FreeCADGui.SendMsgToActiveView("ViewFit")
+        except Exception:  # noqa: BLE001
+            pass
+        koll = self._kollisions_text(nur=stamm + " ")
+        return ("%d Bauteil(e) gebaut: %s%s"
+                % (len(formen), self._describe_build([s for _l, s in formen],
+                                                     {"x": 0}),
+                   (" · ACHTUNG " + koll) if koll else ""))
+
     def run_external_tool(self, tool, args_text: str = "") -> str:
         """Run a macro, an add-on command or a Python function."""
         if tool.kind == "makro":
@@ -4816,9 +4877,12 @@ class T2GPanel(QWidget):
         if tool.kind == "python":
             werte = self._parse_args(args_text)
             ergebnis = T2GTools.call_python_tool(tool, **werte)
-            return "%s(%s) → %s" % (
-                tool.name, ", ".join("%s=%r" % kv for kv in werte.items()),
-                str(ergebnis)[:400])
+            ruf = "%s(%s)" % (tool.name,
+                              ", ".join("%s=%r" % kv for kv in werte.items()))
+            formen = _shapes_from_result(ergebnis)
+            if formen:
+                return "%s → %s" % (ruf, self._add_tool_shapes(tool, formen))
+            return "%s → %s" % (ruf, str(ergebnis)[:400])
         raise T2GTools.ToolError("Unbekannte Werkzeugart: %s" % tool.kind)
 
     # ---- helper tools of the project --------------------------------------

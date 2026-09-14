@@ -2768,6 +2768,15 @@ ARBEITSWEISE
 - `skill_lernen`, `werkzeug_erzeugen`, `skill_verfeinern` dauern Minuten.
   Höchstens einen davon pro Schritt. Fehlt ein Skill, dann lerne ihn - Fragen
   und Nebenarbeiten ersetzen das nicht.
+- BAUT EIN WERKZEUG DIE GANZE BAUGRUPPE, DANN NIMM ES. Steht unter
+  WERKZEUGE eine Funktion, die das Gewuenschte fertig liefert (z. B.
+  `getriebe.baue(gaenge, modul, abstand, wand, ...)`), dann werte die Angaben
+  des Benutzers zu ihren Argumenten aus und rufe sie EINMAL auf:
+  `werkzeug_aufrufen: getriebe.baue;gaenge=5;abstand=3;wand=4`. Das Werkzeug
+  rechnet Achsabstand, Zaehnezahlen, Radlagen und Gehaeusemasse selbst und
+  setzt alle Teile. Siebzehn Bauteile einzeln mit x/y/z zu platzieren sind
+  siebzehn Gelegenheiten, sich zu vertun - dafuer ist `skill_bauen` da, wenn
+  es KEIN passendes Werkzeug gibt.
 - ABGELEITETE MASSE RECHNEN, NICHT RATEN. Steht unter WERKZEUGE eine
   Funktion, die eine Groesse liefert (Achsabstand, Kopfkreis, Gehaeusemass),
   dann `werkzeug_aufrufen` und mit dem Ergebnis weiterbauen. Ein frei
