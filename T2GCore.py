@@ -2698,6 +2698,7 @@ AKTIONEN
       `skill` ist der Name aus SKILLS (zahnrad), nicht der Bauteilname.
       Mehrere Exemplare: denselben Skill mehrfach bauen, jedes mit
       eigenem `als=` und eigener Stelle. x/y/z in mm, dreh_* in Grad.
+  kollision:                      prueft, ob sich Bauteile ueberschneiden
   makro: Name                     ein vorhandenes FreeCAD-Makro ausführen
   befehl: FCGear_InvoluteGear     einen Add-on-Befehl auslösen
   werkzeug_aufrufen: modul.funktion;arg=wert
@@ -2739,6 +2740,12 @@ ARBEITSWEISE
 - JEDES Teil bekommt beim Bauen seine Stelle mit (`x=`/`y=`/`z=`/`dreh_*`).
   Ohne Angabe liegt alles im Ursprung ineinander. Die Rückmeldung nennt die
   tatsächliche Lage - stimmt sie nicht, im nächsten Schritt neu bauen.
+- Bauteile duerfen nicht ineinander stecken. `skill_bauen` meldet eine
+  Ueberschneidung sofort mit ACHTUNG; dann das Teil an eine freie Stelle neu
+  bauen. Fuenf Radpaare brauchen fuenf verschiedene Stellen laengs der Welle,
+  nicht fuenfmal dieselbe. Am Ende einmal `kollision:` ueber alles.
+  Kaemmende Zahnraeder duerfen sich leicht beruehren - Prozentwerte im
+  zweistelligen Bereich heissen, dass zwei Teile am selben Platz stehen.
 - Teile NIE mit einem ```python-Block verschieben oder verschmelzen. Dafür ist
   `skill_bauen` mit x/y/z da; freie Geometrie-Blöcke haben Zahnräder schon
   zerstört (Volumen verfünffacht, statt sie zu bewegen).

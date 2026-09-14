@@ -248,6 +248,23 @@ Hence two prompt rules: derived dimensions come from a tool when one exists, and
 several instances of one skill must differ in the parameters that distinguish
 them (five gears at the default `zaehne=20` are five identical 1:1 pairs).
 
+### Collisions across the document
+
+`T2GSkills.check_kollision` only ever saw the shapes of **one** skill. Ten gears
+built at the same axial position are ten separate builds, each clean on its own,
+so nothing ever noticed they were stacked. `T2GPanel._kollisionen()` checks every
+solid in the document against every other; `skill_bauen` appends an `ACHTUNG`
+line for the part it just built, and the `kollision:` action checks everything.
+
+Two properties that keep it usable:
+- `_overlap()` prefilters with `BoundBox.intersect` — 26 bodies are 325 boolean
+  commons, minutes of work; the box test rejects nearly all of them and the
+  whole-document pass measures 0.13 s.
+- `_KOLL_TOL` (2 % of the smaller part) is what separates a fit from a clash.
+  Meshing gears genuinely intersect a little — 15/35 teeth at 50 mm centre
+  distance must **not** be reported, two gears at the same place (100 %) must.
+  Both are tested.
+
 ### Parameters and the knowledge graph
 
 `ProjectParam` is one agreed value; the `maske` block is how the model asks for

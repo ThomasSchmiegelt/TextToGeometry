@@ -253,14 +253,18 @@ def describe_skills(skills, limit_params: int = 8) -> str:
         if d.description:
             kopf += ": " + d.description.strip().splitlines()[0]
         zeilen.append(kopf)
-        teile = []
         for q in d.params[:limit_params]:
             einheit = ("" if q.unit in ("", "-") else " " + q.unit)
-            teile.append("%s=%s%s" % (q.name, q.default, einheit))
+            zeile = "    %s = %s%s" % (q.name, q.default, einheit)
+            # The label says which direction a measure runs in
+            # ("Innenlaenge (Wellenachse)") -- without it the agent guessed,
+            # and built a 24 mm housing around a 100 mm gearbox.
+            if q.label and q.label.lower() != q.name.lower():
+                zeile += "  — " + q.label
+            zeilen.append(zeile)
         if len(d.params) > limit_params:
-            teile.append("… %d weitere" % (len(d.params) - limit_params))
-        if teile:
-            zeilen.append("    " + ", ".join(teile))
+            zeilen.append("    … %d weitere Parameter"
+                          % (len(d.params) - limit_params))
     return "\n".join(zeilen)
 
 

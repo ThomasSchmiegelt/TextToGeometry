@@ -1981,6 +1981,7 @@ class T2GPanel(QWidget):
         r("baugruppe", self._act_baugruppe,
           "Name;Teil1;Teil2;…  legt die Baugruppe samt Platzhaltern an")
         r("skill_bauen", self._act_skill_bauen, "name;param=wert;param=wert")
+        r("kollision", self._act_kollision, "")
         r("skill_lernen", lambda a: "", "name  (dauert Minuten)")
         r("werkzeug_erzeugen", lambda a: "", "name  (dauert Minuten)")
         r("skill_verfeinern", lambda a: "", "name;Auftrag  (dauert Minuten)")
@@ -2292,11 +2293,97 @@ class T2GPanel(QWidget):
                 if sneed.name in (gebaut, roh, name) and sneed.status != "gelernt":
                     sneed.status = "gebaut"
             self._project.save()
-        return "%s gebaut%s: %s%s" % (
+        # What it touches matters as much as where it is: a part reported as
+        # built is not built right if it sits inside its neighbour.
+        koll = self._kollisions_text(nur="T2G %s [1/%d]" % (gebaut, len(shapes)))
+        if not koll:
+            koll = self._kollisions_text(nur="T2G %s [1/1]" % gebaut)
+        return "%s gebaut%s: %s%s%s" % (
             gebaut,
             (" (Skill %s)" % name) if gebaut != name else "",
             self._describe_build(shapes, platz),
-            (" · Hinweise: " + "; ".join(problems)) if problems else "")
+            (" · Hinweise: " + "; ".join(problems)) if problems else "",
+            (" · ACHTUNG " + koll) if koll else "")
+
+    #: An overlap below this share of the smaller part is a fit, not a clash.
+    _KOLL_TOL = 0.02
+
+    @staticmethod
+    def _doc_solids() -> list:
+        """Every solid body in the document, as (label, shape) pairs."""
+        doc = _active_doc()
+        if doc is None:
+            return []
+        out = []
+        for o in doc.Objects:
+            shp = getattr(o, "Shape", None)
+            if shp is not None and not shp.isNull() and shp.Solids:
+                out.append((getattr(o, "Label", o.Name), shp))
+        return out
+
+    @classmethod
+    def _overlap(cls, a, b) -> float:
+        """Shared volume of two shapes, with a cheap bounding-box prefilter.
+
+        The boolean common of 26 bodies pairwise is 325 operations and takes
+        minutes; the box test rejects almost all of them in microseconds.
+        """
+        try:
+            ba, bb = a.BoundBox, b.BoundBox
+            if not ba.intersect(bb):
+                return 0.0
+        except Exception:  # noqa: BLE001 - fall through to the exact test
+            pass
+        try:
+            return float(getattr(a.common(b), "Volume", 0.0) or 0.0)
+        except Exception:  # noqa: BLE001 - a failed cut is not a collision
+            return 0.0
+
+    @classmethod
+    def _kollisionen(cls, nur: str = "") -> list:
+        """Parts that sit inside each other, worst first.
+
+        The skill engine's `kollision` rule only ever saw the shapes of ONE
+        skill. Ten gears built at the same axial position are ten separate
+        builds, each clean on its own — nothing looked at the assembly, so the
+        agent never learned they were stacked.
+        """
+        teile = cls._doc_solids()
+        treffer = []
+        for i in range(len(teile)):
+            for j in range(i + 1, len(teile)):
+                (la, sa), (lb, sb) = teile[i], teile[j]
+                if nur and nur not in (la, lb):
+                    continue
+                vol = cls._overlap(sa, sb)
+                if vol <= 1e-6:
+                    continue
+                kleiner = min(float(getattr(sa, "Volume", 0.0) or 0.0),
+                              float(getattr(sb, "Volume", 0.0) or 0.0))
+                anteil = vol / kleiner if kleiner > 0 else 0.0
+                if anteil > cls._KOLL_TOL:
+                    treffer.append((anteil, vol, la, lb))
+        treffer.sort(reverse=True)
+        return treffer
+
+    @classmethod
+    def _kollisions_text(cls, nur: str = "", limit: int = 6) -> str:
+        treffer = cls._kollisionen(nur)
+        if not treffer:
+            return ""
+        zeilen = ["%s steckt in %s (%.0f mm^3, %.0f %% des kleineren Teils)"
+                  % (la, lb, vol, anteil * 100)
+                  for anteil, vol, la, lb in treffer[:limit]]
+        if len(treffer) > limit:
+            zeilen.append("… und %d weitere" % (len(treffer) - limit))
+        return "; ".join(zeilen)
+
+    def _act_kollision(self, action) -> str:
+        text = self._kollisions_text()
+        if not text:
+            return ("keine Ueberschneidungen: alle %d Koerper stehen frei"
+                    % len(self._doc_solids()))
+        return "ueberschneidungen: " + text
 
     def _place_shape(self, shp, platz: dict):
         """Move and turn a freshly built shape -- without touching its volume.
