@@ -201,7 +201,8 @@ def _kontur(achsen, radien):
     return f
 
 
-def _abschnitt_koerper(achsen, radien, z0, z1, zuschlag=0.0):
+def _abschnitt_koerper(achsen, radien, z0, z1, zuschlag=0.0,
+                       radien_fest=None):
     """Ein Abschnitt als 3D-Körper: ein Zylinder je Achse, dazu der Steg.
 
     Bewusst aus Grundkörpern statt aus einer 2D-Kontur mit ``makeOffset2D``:
@@ -213,11 +214,16 @@ def _abschnitt_koerper(achsen, radien, z0, z1, zuschlag=0.0):
     """
     hoehe = float(z1) - float(z0)
     punkte = [Vector(float(ya), float(za), float(z0)) for ya, za in achsen]
-    stuecke = [Part.makeCylinder(float(r) + float(zuschlag), hoehe, p)
-               for p, r in zip(punkte, radien)]
+    # `radien_fest` gilt unmittelbar, ohne Wandzuschlag — damit kann ein
+    # Abschnitt aussen so gross sein wie seine Nachbarn, obwohl sein
+    # Hohlraum nur ein Wellendurchlass ist. Genau das ist eine Zwischenwand.
+    wirksam = ([float(r) for r in radien_fest] if radien_fest is not None
+               else [float(r) + float(zuschlag) for r in radien])
+    stuecke = [Part.makeCylinder(r, hoehe, p)
+               for p, r in zip(punkte, wirksam)]
     for i in range(len(punkte) - 1):
-        r1 = float(radien[i]) + float(zuschlag)
-        r2 = float(radien[i + 1]) + float(zuschlag)
+        r1 = wirksam[i]
+        r2 = wirksam[i + 1]
         halb = min(r1, r2) * 0.7
         steg = _steg(Vector(punkte[i].x, punkte[i].y, 0),
                      Vector(punkte[i + 1].x, punkte[i + 1].y, 0), halb)
@@ -260,20 +266,32 @@ def baue(achsen, radien=None, abschnitte=None, breite=60.0, luft=3.0,
         if radien is None:
             raise GehaeuseFehler("Weder abschnitte noch radien angegeben.")
         abschnitte = [(float(breite),
-                       [float(r) + float(luft) for r in radien])]
-    abschnitte = [(float(l), [float(r) for r in rs]) for l, rs in abschnitte]
-    if any(len(rs) != len(achsen) for _l, rs in abschnitte):
+                       [float(r) + float(luft) for r in radien], None)]
+    # Ein Abschnitt ist (laenge, innenradien) oder, fuer eine Zwischenwand,
+    # (laenge, innenradien, aussenradien).
+    normiert = []
+    for eintrag in abschnitte:
+        if len(eintrag) == 3:
+            l, rs, aussen_rs = eintrag
+            aussen_rs = [float(r) for r in aussen_rs]
+        else:
+            l, rs = eintrag
+            aussen_rs = None
+        normiert.append((float(l), [float(r) for r in rs], aussen_rs))
+    abschnitte = normiert
+    if any(len(rs) != len(achsen) for _l, rs, _a in abschnitte):
         raise GehaeuseFehler("Zu jeder Achse gehört ein Radius je Abschnitt.")
 
-    laenge = sum(l for l, _rs in abschnitte)
+    laenge = sum(l for l, _rs, _a in abschnitte)
     gesamt_h = laenge + 2.0 * wand
 
     aussen_teile, innen_teile = [], []
     z = 0.0
-    for k, (l, rs) in enumerate(abschnitte):
+    for k, (l, rs, aussen_rs) in enumerate(abschnitte):
         von = z - (wand if k == 0 else 0.0)
         bis = z + l + (wand if k == len(abschnitte) - 1 else 0.0)
-        aussen_teile.append(_abschnitt_koerper(achsen, rs, von, bis, wand))
+        aussen_teile.append(_abschnitt_koerper(achsen, rs, von, bis, wand,
+                                               radien_fest=aussen_rs))
         innen_teile.append(_abschnitt_koerper(achsen, rs, z, z + l))
         z += l
 
@@ -285,7 +303,8 @@ def baue(achsen, radien=None, abschnitte=None, breite=60.0, luft=3.0,
 
     # Flansch: ein Kragen an der Trennebene, über die Kontur hinaus.
     p0, d, n = trennebene(achsen)
-    groesste = [max(rs[i] for _l, rs in abschnitte) for i in range(len(achsen))]
+    groesste = [max((a[i] - wand) if a is not None else rs[i]
+                    for _l, rs, a in abschnitte) for i in range(len(achsen))]
     kragen = _abschnitt_koerper(achsen, groesste, -wand, laenge + wand,
                                 wand + flansch_b)
     scheibe = _block(p0, d, -wand - 1.0, gesamt_h + 2.0, dicke=flansch_b,

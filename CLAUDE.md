@@ -375,6 +375,13 @@ are thin starters, because a macro gets no arguments and returns nothing
 
   Shaft bores are cut **after** the flange is fused on, or the collar fills
   them in again and the shaft sits inside the end wall.
+
+  A section may also carry explicit outer radii — `(laenge, innen, aussen)` —
+  and that is how a **partition wall** is built: its cavity is only the shaft
+  bore while its outside matches the neighbouring gear section. Without it the
+  bearing sleeve ended in mid-air: 451 mm³ of sleeve per millimetre at
+  x 1…13, then nothing from x 15 on. The bearing needs that wall to seat
+  against.
 - `Tools/getriebe_fcgear.py` — real involute gears, idlers and shift sleeves.
 
 Two facts that cost a measurement each: the idler needs **half a tooth pitch**

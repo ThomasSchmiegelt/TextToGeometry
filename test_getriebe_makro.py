@@ -201,6 +201,31 @@ if hat_fcgear:
     pruefe(all(huelle.XMin <= s.BoundBox.XMin and huelle.XMax >= s.BoundBox.XMax
                for s in lagerteile),
            "alle %d Lagerteile liegen im Gehaeuse" % len(lagerteile))
+
+    # Zwischen Lager und erstem Rad muss eine durchgehende Wand stehen, an
+    # der sich das Lager abstuetzt. Ohne sie endete die Lagerhuelse frei im
+    # Getrieberaum: bei x 1..13 standen 451 mm^3 je Millimeter, ab x 15 null.
+    ganzes_gehaeuse = gh[0].fuse(gh[1])
+    aussenringe = [s for n, s in teile if "Aussenring" in n]
+    raedershapes = [s for n, s in teile if "rad " in n.lower()]
+    lager_ende = max(s.BoundBox.XMax for s in aussenringe
+                     if s.BoundBox.XMax < 60)
+    rad_anfang = min(s.BoundBox.XMin for s in raedershapes)
+    dicht = 0.0
+    schritt_x = 0.5
+    x = lager_ende + schritt_x
+    while x < rad_anfang:
+        scheibe = Part.makeCylinder(45.0, 0.4, FreeCAD.Vector(x, 48.0, 0.0),
+                                    FreeCAD.Vector(1, 0, 0))
+        loch = Part.makeCylinder(11.0, 2.0, FreeCAD.Vector(x - 1, 48.0, 0.0),
+                                 FreeCAD.Vector(1, 0, 0))
+        ring = scheibe.cut(loch)
+        if ganzes_gehaeuse.common(ring).Volume > 0.55 * ring.Volume:
+            dicht += schritt_x
+        x += schritt_x
+    pruefe(dicht >= 3.0,
+           "Zwischenwand zwischen Lager und Rad: %.1f mm von %.1f mm Luecke"
+           % (dicht, rad_anfang - lager_ende))
     FreeCAD.closeDocument(doc.Name)
 
 log("\nFEHLER: %d" % len(FEHLER))

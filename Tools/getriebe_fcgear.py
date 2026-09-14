@@ -192,8 +192,13 @@ def baue(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
     # im ersten Wurf sass es bei x -23..-9 und beruehrte das Gehaeuse mit
     # 0 mm^3.
     sitz_r = lm["D"] / 2.0
-    vorlauf = lm["B"]
-    abschnitte = [(vorlauf, [sitz_r, sitz_r])]
+    welle_r = welle_d / 2.0 + spiel
+    # Lagersitz, dann eine Zwischenwand, dann die Radabschnitte. Ohne die
+    # Wand endet die Lagerhuelse frei im Getrieberaum — gemessen: bei x 1..13
+    # standen 451 mm^3 Huelse je Millimeter, ab x 15 null. An dieser Wand
+    # stuetzt sich das Lager ab, und nur die Welle geht hindurch.
+    vorlauf = lm["B"] + wand
+    abschnitte = [(lm["B"], [sitz_r, sitz_r])]
     for k, (z1, z2, i) in enumerate(paare):
         x = vorlauf + k * schritt + luft / 2.0
         fest, d_w1, d_a1 = zahnrad(doc, z1, modul, breite, welle_d,
@@ -214,10 +219,19 @@ def baue(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
         lege_ab(los, "Gang %d Losrad (z=%d, i=%.3f)" % (k + 1, z2, i),
                 (x, a, 0.0), phase=180.0 / float(z2))
         # Dieser Abschnitt der Gehäusewand folgt genau diesem Radpaar.
-        abschnitte.append((schritt, [d_a1 / 2.0 + float(gehaeuse_luft),
-                                     d_a2 / 2.0 + float(gehaeuse_luft)]))
-    abschnitte.append((vorlauf, [sitz_r, sitz_r]))
-    innen_l = sum(l for l, _rs in abschnitte)
+        raum = [d_a1 / 2.0 + float(gehaeuse_luft),
+                d_a2 / 2.0 + float(gehaeuse_luft)]
+        if k == 0:
+            # Zwischenwand: innen nur der Wellendurchlass, aussen so gross
+            # wie der anschliessende Radabschnitt.
+            abschnitte.append((wand, [welle_r, welle_r],
+                               [r + wand for r in raum]))
+        abschnitte.append((schritt, raum))
+        if k == len(paare) - 1:
+            abschnitte.append((wand, [welle_r, welle_r],
+                               [r + wand for r in raum]))
+    abschnitte.append((lm["B"], [sitz_r, sitz_r]))
+    innen_l = sum(a[0] for a in abschnitte)
 
     # --- Wellen ----------------------------------------------------------
     ueberstand = 8.0
