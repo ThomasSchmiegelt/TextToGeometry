@@ -1,0 +1,99 @@
+# SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary
+"""Baut ein Rillenkugellager nach DIN 625-1 — mit Eingabemaske.
+
+Fragt Bezeichnung, Passungsspiel, Lage und Werkstoff ab und legt Innenring,
+Außenring und Kugeln als eigene Körper ins aktive Dokument. Der Werkstoff wird
+am Bauteil hinterlegt (``ShapeMaterial``).
+
+Die Rechen- und Geometriearbeit steckt in ``Tools/lager_din625.py`` des
+Add-ons TextToGeometry; dieses Makro ist nur der Starter. So bleibt die Logik
+testbar und ist zugleich für den Agenten aufrufbar.
+"""
+
+import os
+import sys
+
+import FreeCAD
+
+
+def _tools_pfad():
+    """Das Tools-Verzeichnis des Add-ons finden, von wo auch immer wir laufen.
+
+    Ein Makro liegt in FreeCADs Makro-Ordner, das Add-on unter ``Mod/`` — der
+    Weg dahin führt über FreeCAD selbst, nicht über ``__file__``. Und
+    ``"__file__" in dir()`` hilft hier nicht: in einer Funktion listet ``dir()``
+    die lokalen Namen, nie die des Moduls.
+    """
+    kandidaten = []
+    try:
+        hier = os.path.dirname(os.path.abspath(__file__))
+        kandidaten.append(os.path.join(os.path.dirname(hier), "Tools"))
+    except NameError:
+        pass
+    try:
+        kandidaten.append(os.path.join(FreeCAD.getUserAppDataDir(), "Mod",
+                                       "TextToGeometry", "Tools"))
+    except Exception:  # noqa: BLE001
+        pass
+    kandidaten.append(os.path.join(os.path.expanduser("~"), ".local", "share",
+                                   "FreeCAD", "v1-1", "Mod", "TextToGeometry",
+                                   "Tools"))
+    for p in kandidaten:
+        if os.path.isdir(p):
+            return p
+    return None
+
+
+def _melde(text):
+    FreeCAD.Console.PrintMessage("T2G Lager: %s\n" % text)
+
+
+def haupt():
+    pfad = _tools_pfad()
+    if pfad is None:
+        FreeCAD.Console.PrintError(
+            "T2G Lager: Das Add-on TextToGeometry wurde nicht gefunden.\n")
+        return
+    if pfad not in sys.path:
+        sys.path.insert(0, pfad)
+
+    import lager_din625 as LG
+    import t2g_maske as M
+
+    felder = [
+        M.Feld("bezeichnung", "Lager", "", "6204",
+               auswahl=[z[0] for z in LG.TABELLE],
+               gruppe="Lager",
+               hinweis="Normmaße nach DIN 625-1: d, D, B und Kantenabstand"),
+        M.Feld("spiel", "Passungsspiel", "mm", 0.1, 0.0, 2.0, gruppe="Lager",
+               hinweis="Bohrung wird um diesen Wert größer als d"),
+        M.Feld("kugeln", "Wälzkörper", "Stk", 0, 0, 30, gruppe="Lager",
+               hinweis="0 = aus dem Laufkreis schätzen (nicht genormt)"),
+        M.Feld("werkstoff", "Werkstoff", "", "lagerstahl",
+               auswahl=["lagerstahl", "stahl", "calculix-steel"],
+               gruppe="Lager"),
+        M.Feld("achse", "Achsrichtung", "", "z", auswahl=["x", "y", "z"],
+               gruppe="Lage"),
+        M.Feld("x", "x", "mm", 0.0, -10000.0, 10000.0, gruppe="Lage"),
+        M.Feld("y", "y", "mm", 0.0, -10000.0, 10000.0, gruppe="Lage"),
+        M.Feld("z", "z", "mm", 0.0, -10000.0, 10000.0, gruppe="Lage"),
+    ]
+
+    werte = M.frage_ab(felder, "Rillenkugellager DIN 625", kennung="lager")
+    if werte is None:
+        _melde("abgebrochen")
+        return
+
+    doc = FreeCAD.ActiveDocument or FreeCAD.newDocument("Lager")
+    objekte, meldung = LG.baue_mit_werkstoff(doc=doc, **werte)
+    m = LG.masse(werte["bezeichnung"])
+    _melde("%s (d %.0f / D %.0f / B %.0f) — %d Körper, %s"
+           % (m["bezeichnung"], m["d"], m["D"], m["B"], len(objekte), meldung))
+    try:
+        import FreeCADGui
+        FreeCADGui.SendMsgToActiveView("ViewFit")
+    except Exception:  # noqa: BLE001 - headless ist in Ordnung
+        pass
+
+
+haupt()

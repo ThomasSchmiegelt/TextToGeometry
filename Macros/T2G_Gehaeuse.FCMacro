@@ -1,0 +1,161 @@
+# SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary
+"""Baut ein geteiltes Getriebegehäuse, dessen Wand der Radkontur folgt.
+
+Statt eines Quaders mit viel Luft in den Ecken entsteht die Doppel-Nierenform
+eines echten Getriebegehäuses: ein Kreis um jede Wellenachse, verschmolzen,
+nach außen versetzt. Geteilt wird in der Ebene durch beide Wellen, dort sitzt
+der Flansch mit seinen Durchgangsbohrungen.
+
+Sind Zahnräder im Dokument ausgewählt, werden Achslage und Kopfradius daraus
+übernommen — sonst fragt die Maske danach.
+
+Die Geometrie steckt in ``Tools/gehaeuse_kontur.py`` des Add-ons
+TextToGeometry; dieses Makro ist nur der Starter.
+"""
+
+import os
+import sys
+
+import FreeCAD
+
+
+def _tools_pfad():
+    """Das Tools-Verzeichnis des Add-ons finden, von wo auch immer wir laufen."""
+    kandidaten = []
+    try:
+        hier = os.path.dirname(os.path.abspath(__file__))
+        kandidaten.append(os.path.join(os.path.dirname(hier), "Tools"))
+    except NameError:
+        pass
+    try:
+        kandidaten.append(os.path.join(FreeCAD.getUserAppDataDir(), "Mod",
+                                       "TextToGeometry", "Tools"))
+    except Exception:  # noqa: BLE001
+        pass
+    kandidaten.append(os.path.join(os.path.expanduser("~"), ".local", "share",
+                                   "FreeCAD", "v1-1", "Mod", "TextToGeometry",
+                                   "Tools"))
+    for p in kandidaten:
+        if os.path.isdir(p):
+            return p
+    return None
+
+
+def _aus_auswahl():
+    """Achslagen und Kopfradien aus den ausgewählten Zahnrädern lesen.
+
+    Liefert (achsen, radien, breite) oder None. Gelesen wird der Hüllquader —
+    das funktioniert für FCGear-Räder genauso wie für eigene.
+    """
+    try:
+        import FreeCADGui
+        auswahl = FreeCADGui.Selection.getSelection()
+    except Exception:  # noqa: BLE001 - headless oder nichts gewählt
+        return None
+    formen = [o for o in auswahl
+              if getattr(o, "Shape", None) is not None
+              and not o.Shape.isNull() and o.Shape.Solids]
+    if len(formen) < 2:
+        return None
+    achsen, radien, laengen = [], [], []
+    for o in formen:
+        b = o.Shape.BoundBox
+        # Die Radachse ist die kürzeste Ausdehnung; quer dazu liegt der Kreis.
+        masse = [("x", b.XLength), ("y", b.YLength), ("z", b.ZLength)]
+        achse = min(masse, key=lambda t: t[1])
+        quer = [m for m in masse if m[0] != achse[0]]
+        mitte = {"x": (b.XMin + b.XMax) / 2.0, "y": (b.YMin + b.YMax) / 2.0,
+                 "z": (b.ZMin + b.ZMax) / 2.0}
+        achsen.append(tuple(round(mitte[k], 3) for k, _v in quer))
+        radien.append(max(v for _k, v in quer) / 2.0)
+        laengen.append(achse[1])
+    # Gleiche Achse mehrfach: den größten Radius behalten.
+    zusammen = {}
+    for a, r in zip(achsen, radien):
+        zusammen[a] = max(zusammen.get(a, 0.0), r)
+    if len(zusammen) < 1:
+        return None
+    achsen = sorted(zusammen)
+    return achsen, [zusammen[a] for a in achsen], max(laengen) * len(formen)
+
+
+def _melde(text):
+    FreeCAD.Console.PrintMessage("T2G Gehaeuse: %s\n" % text)
+
+
+def haupt():
+    pfad = _tools_pfad()
+    if pfad is None:
+        FreeCAD.Console.PrintError(
+            "T2G Gehaeuse: Das Add-on TextToGeometry wurde nicht gefunden.\n")
+        return
+    if pfad not in sys.path:
+        sys.path.insert(0, pfad)
+
+    import gehaeuse_kontur as GK
+    import t2g_maske as M
+
+    gelesen = _aus_auswahl()
+    if gelesen:
+        achsen, radien, breite = gelesen
+        _melde("%d Radachse(n) aus der Auswahl übernommen" % len(achsen))
+    else:
+        achsen, radien, breite = [(0.0, 0.0), (0.0, 48.0)], [22.0, 30.0], 60.0
+
+    felder = [
+        M.Feld("achsabstand", "Achsabstand", "mm",
+               float(abs(achsen[-1][1] - achsen[0][1]) or 48.0), 1.0, 2000.0,
+               gruppe="Radsatz"),
+        M.Feld("radius_1", "Kopfradius Welle 1", "mm", float(radien[0]),
+               1.0, 1000.0, gruppe="Radsatz"),
+        M.Feld("radius_2", "Kopfradius Welle 2", "mm",
+               float(radien[-1]), 1.0, 1000.0, gruppe="Radsatz"),
+        M.Feld("breite", "Innenlänge (Wellenrichtung)", "mm", float(breite),
+               5.0, 2000.0, gruppe="Radsatz"),
+        M.Feld("luft", "Freigang Rad → Innenwand", "mm", 3.0, 0.0, 100.0,
+               gruppe="Gehäuse"),
+        M.Feld("wand", "Wandstärke", "mm", 4.0, 1.0, 100.0, gruppe="Gehäuse"),
+        M.Feld("flansch_b", "Flanschbreite", "mm", 12.0, 2.0, 100.0,
+               gruppe="Flansch"),
+        M.Feld("schraube_d", "Schraubendurchmesser", "mm", 6.0, 2.0, 30.0,
+               gruppe="Flansch"),
+        M.Feld("achse", "Wellenrichtung", "", "x", auswahl=["x", "y", "z"],
+               gruppe="Gehäuse"),
+        M.Feld("werkstoff", "Werkstoff", "", "stahl",
+               auswahl=["stahl", "calculix-steel", "lagerstahl"],
+               gruppe="Gehäuse"),
+    ]
+
+    werte = M.frage_ab(felder, "Getriebegehaeuse", kennung="gehaeuse")
+    if werte is None:
+        _melde("abgebrochen")
+        return
+
+    achsen = [(0.0, 0.0), (0.0, float(werte["achsabstand"]))]
+    radien = [float(werte["radius_1"]), float(werte["radius_2"])]
+    teile = GK.baue(achsen, radien, breite=werte["breite"],
+                    luft=werte["luft"], wand=werte["wand"],
+                    flansch_b=werte["flansch_b"],
+                    schraube_d=werte["schraube_d"], achse=werte["achse"])
+
+    doc = FreeCAD.ActiveDocument or FreeCAD.newDocument("Gehaeuse")
+    objekte = []
+    for label, shp in teile:
+        o = doc.addObject("Part::Feature", "Gehaeuseteil")
+        o.Shape = shp
+        o.Label = label
+        objekte.append(o)
+    doc.recompute()
+
+    import werkstoff as W
+    meldung = W.zuweisen(objekte, werte["werkstoff"])
+    _melde("%d Teil(e), zusammen %.0f mm^3 — %s"
+           % (len(objekte), sum(o.Shape.Volume for o in objekte), meldung))
+    try:
+        import FreeCADGui
+        FreeCADGui.SendMsgToActiveView("ViewFit")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+haupt()
