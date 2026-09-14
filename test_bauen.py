@@ -243,6 +243,22 @@ r = p.run_external_tool(werkzeug, "gaenge=3;abstand=5;wand=6")
 gebaut = koerper(doc)
 pruefe(len(gebaut) == 49, "erneuter Aufruf ersetzt (%d Bauteile)" % len(gebaut))
 
+# --- 8: skill_bauen erreicht auch ein Baugruppen-Werkzeug ----------------
+log("\n--- skill_bauen findet das Werkzeug ---")
+FreeCAD.newDocument("SkillWerkzeug")
+p = Panel()
+p._tools = T2GTools.discover_python_tools([os.path.join(HERE, "Tools")])
+r = p._act_skill_bauen(Aktion("getriebe", "gaenge=5", "abstand=3", "wand=4"))
+log("     %s" % r[:120])
+gebaut = koerper(FreeCAD.ActiveDocument)
+pruefe(len(gebaut) == 53,
+       "skill_bauen: getriebe baut 53 Bauteile (%d)" % len(gebaut))
+pruefe("ACHTUNG" not in r, "kollisionsfrei")
+# Ein echter Skill bleibt ein Skill.
+r = p._act_skill_bauen(Aktion("zahnrad", "als=probe", "x=300"))
+pruefe("gebaut" in r and "Bauteil(e)" not in r,
+       "ein vorhandener Skill wird weiter als Skill gebaut")
+
 log("\nFEHLER: %d" % len(FEHLER))
 log("ALLE GRUEN" if not FEHLER else "FEHLGESCHLAGEN")
 if FEHLER:

@@ -2283,9 +2283,30 @@ class T2GPanel(QWidget):
             "die Stelle mit als=zahnrad_3;x=..;y=..;z=.. an."
             % (name, ", ".join(eng.registry.names()) or "keine"))
 
+    def _baugruppen_werkzeug(self, name: str):
+        """A tool that builds a whole assembly under this name, if there is one.
+
+        The model reaches for `skill_bauen` whatever the prompt says -- three
+        runs in a row it placed seventeen parts by hand with `getriebe.baue`
+        sitting first in the tool list. So the builder is put where its hand
+        already goes: `skill_bauen: getriebe;gaenge=5` finds the tool.
+        """
+        if not name or not getattr(self, "_tools", None):
+            return None
+        for kandidat in (name, name + ".baue", name + ".build"):
+            t = T2GTools.find_tool(self._tools, kandidat)
+            if t is not None and t.kind == "python":
+                return t
+        return None
+
     def _act_skill_bauen(self, action) -> str:
         roh = action.arg(0)
         eng = self._skills_engine(reload=True)
+        if roh not in eng.registry.names():
+            werkzeug = self._baugruppen_werkzeug(roh)
+            if werkzeug is not None:
+                return self.run_external_tool(werkzeug,
+                                              ";".join(action.args[1:]))
         name = self._resolve_skill_name(eng, roh)
         values = {}
         platz = {}
@@ -2509,9 +2530,6 @@ class T2GPanel(QWidget):
         doc = _active_doc()
         ctx = T2GCore.describe_document(_doc_objects(doc), _selection_names())
         pblock = self._project.as_prompt_block() if self._project else ""
-        engine = self._skills_engine()
-        T2GPanel._known_skills_hint = list(engine.registry.names())
-        skills = T2GSkills.describe_skills(engine.registry.items())
         if not getattr(self, "_tools", None):
             try:
                 self._tools_scan()
@@ -2523,6 +2541,22 @@ class T2GPanel(QWidget):
         brauchbar = [t for t in (self._tools or []) if t.kind != "addon"]
         brauchbar.sort(key=lambda t: 0 if t.kind == "python" else 1)
         werkzeuge = T2GTools.describe_tools(brauchbar, limit=40)
+
+        engine = self._skills_engine()
+        T2GPanel._known_skills_hint = list(engine.registry.names())
+        skills = T2GSkills.describe_skills(engine.registry.items())
+        # Assembly builders belong here too, not only under WERKZEUGE: this is
+        # the block the model actually reads before choosing `skill_bauen`.
+        bauer = [t for t in brauchbar
+                 if t.kind == "python" and t.entry in ("baue", "build")]
+        if bauer:
+            skills += ("\n\nGANZE BAUGRUPPEN AUF EINMAL – ein Aufruf statt "
+                       "vieler Einzelteile, rechnet Masse und Lagen selbst.\n"
+                       "Aufruf wie ein Skill: `skill_bauen: <name>;arg=wert`\n"
+                       + "\n".join("- %s%s: %s" % (t.name.split(".")[0],
+                                                   t.signature or "",
+                                                   t.description)
+                                    for t in bauer))
         prompt = T2GAgent.build_agent_prompt(
             run, pblock, ctx, skills=skills,
             answered=getattr(run, "answered", ""), tools=werkzeuge)
