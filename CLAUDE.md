@@ -26,6 +26,7 @@ python3 test_learn.py   # 26 tests: research, skill learning, validation
 python3 test_project.py # 61 tests: project layout, AHP maths, matching, params, graph
 python3 test_agent.py   # 24 tests: agent protocol, action registry, run budget
 FreeCADCmd test_skills.py   # skills engine — needs the REAL Part module (see gotcha)
+FreeCADCmd Beispiele/getriebe_5gang.py   # reference gearbox; exits 1 if a promise breaks
 
 T2G_TEST_NET=1 python3 test_learn.py   # also exercises the live Wikipedia call
 ```
@@ -208,6 +209,16 @@ exist — "unknown skill" alone cost twelve steps in one run.
 `_describe_build()` reports the resulting bounding box *in document
 coordinates*. Without the position the agent cannot tell ten stacked parts from
 ten placed ones, and happily reported success on a pile at the origin.
+
+### The reference gearbox
+
+`Beispiele/getriebe_5gang.py` is the versioned form of the gearbox: it builds all
+17 parts from the four skills plus `Tools/getriebe_auslegung.py` and checks seven
+promises (part count, every part a solid, one centre distance for all five gears,
+≥ 3 mm gear-to-wall clearance, tip circles larger than the centre distance so the
+teeth actually mesh, outer width = inner + 2 × wall). It exits 1 on any breach, so
+it doubles as a regression test over the skills. The `.FCStd` is its *output* and
+stays gitignored — regenerate it rather than committing a binary.
 
 ### Parameters and the knowledge graph
 
