@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import sys
 
 import FreeCAD
 import FreeCADGui
@@ -5657,6 +5658,288 @@ class T2GApiTestCommand(_PanelActionMixin):
         _PanelActionMixin._guard(lambda: p._api_test())()
 
 
+class _MakroCommand:
+    """Basis für die drei Konstruktionsbefehle (Getriebe, Lager, Gehäuse).
+
+    Dieselbe Logik wie die gleichnamigen Makros in ``Macros/`` — nur hier in
+    der Workbench, mit Symbol und Menüeintrag. Die Rechen- und Geometriearbeit
+    steckt in ``Tools/``; hier stehen Maske, Dokument und Werkstoff.
+
+    Das Bauen läuft bewusst NICHT in einem Arbeitsthread: die Maske ist ein
+    modaler Dialog, und danach dauert es zwei bis fünf Sekunden. Ein Worker
+    brächte hier nur die Gefahr, Geometrie außerhalb des GUI-Threads
+    anzulegen.
+    """
+
+    #: Von den Unterklassen zu setzen.
+    titel = ""
+    kennung = ""
+
+    def IsActive(self) -> bool:
+        return True
+
+    def _tools(self):
+        """Das Tools-Verzeichnis des Add-ons auf sys.path bringen."""
+        pfad = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "Tools")
+        if os.path.isdir(pfad) and pfad not in sys.path:
+            sys.path.insert(0, pfad)
+        return pfad
+
+    def felder(self, M):
+        raise NotImplementedError
+
+    def bauen(self, doc, werte):
+        """(Objekte, Meldung)."""
+        raise NotImplementedError
+
+    def Activated(self) -> None:
+        try:
+            self._tools()
+            import t2g_maske as M
+        except Exception as e:  # noqa: BLE001
+            FreeCAD.Console.PrintError("%s: %s\n" % (self.titel, e))
+            return
+        try:
+            werte = M.frage_ab(self.felder(M), self.titel, self.kennung)
+        except Exception as e:  # noqa: BLE001
+            FreeCAD.Console.PrintError("%s: Maske: %s\n" % (self.titel, e))
+            return
+        if werte is None:
+            return
+        doc = _active_doc(create=True)
+        panel = _PANEL
+        try:
+            objekte, meldung = self.bauen(doc, werte)
+        except Exception as e:  # noqa: BLE001
+            FreeCAD.Console.PrintError("%s: %s\n" % (self.titel, e))
+            if panel is not None:
+                panel.log_edit.appendPlainText("%s: %s" % (self.titel, e))
+            return
+        doc.recompute()
+        text = ("%s: %d Bauteil(e), zusammen %.0f mm^3 — %s"
+                % (self.titel, len(objekte),
+                   sum(o.Shape.Volume for o in objekte
+                       if getattr(o, "Shape", None) is not None), meldung))
+        FreeCAD.Console.PrintMessage(text + "\n")
+        if panel is not None:
+            panel.log_edit.appendPlainText(text)
+            koll = panel._kollisions_text()
+            if koll:
+                panel.log_edit.appendPlainText("ACHTUNG " + koll)
+        try:
+            FreeCADGui.SendMsgToActiveView("ViewFit")
+        except Exception:  # noqa: BLE001
+            pass
+
+
+class T2GGetriebeCommand(_MakroCommand):
+    """Ein vollständiges Schaltgetriebe aus FCGear-Rädern."""
+
+    titel = "Schaltgetriebe"
+    kennung = "getriebe"
+
+    def GetResources(self) -> dict:
+        return {
+            "MenuText": "Getriebe bauen …",
+            "ToolTip": "Schaltgetriebe mit Evolventenverzahnung (FCGear), "
+                       "Lagern nach DIN 625 und geteiltem Konturgehäuse",
+            "Pixmap": _icon("t2g-getriebe.svg"),
+        }
+
+    def felder(self, M):
+        import getriebe_fcgear as GF
+        import lager_din625 as LG
+        return [
+            M.Feld("gaenge", "Gänge", "Stk", 5, 1, 12, gruppe="Getriebe"),
+            M.Feld("zaehne_summe", "Zähnesumme z1+z2", "", 48, 20, 200,
+                   gruppe="Getriebe",
+                   hinweis="Für alle Gänge gleich – daraus folgt ein "
+                           "Achsabstand"),
+            M.Feld("modul", "Modul", "mm", 2.0, 0.3, 20.0, gruppe="Getriebe"),
+            M.Feld("breite", "Zahnbreite", "mm", 12.0, 1.0, 200.0,
+                   gruppe="Getriebe"),
+            M.Feld("luft", "Luft zwischen den Radpaaren", "mm", 6.0, 1.0,
+                   100.0, gruppe="Getriebe",
+                   hinweis="Hier hinein passt die Schaltmuffe"),
+            M.Feld("verzahnung", "Verzahnung", "", "gerade",
+                   auswahl=list(GF.VERZAHNUNG), gruppe="Verzahnung"),
+            M.Feld("schraegwinkel", "Schrägungswinkel", "Grad", 15.0, 0.0,
+                   45.0, gruppe="Verzahnung",
+                   hinweis="Wirkt bei „schraeg“ und „pfeil“"),
+            M.Feld("eingriffswinkel", "Eingriffswinkel", "Grad", 20.0, 14.0,
+                   30.0, gruppe="Verzahnung"),
+            M.Feld("flankenspiel", "Flankenspiel", "mm", 0.05, 0.0, 1.0,
+                   gruppe="Verzahnung"),
+            M.Feld("welle_d", "Wellendurchmesser", "mm", 20.0, 5.0, 200.0,
+                   gruppe="Wellen und Lager"),
+            M.Feld("lager_reihe", "Lagerreihe", "", "62",
+                   auswahl=list(LG.reihen()), gruppe="Wellen und Lager",
+                   hinweis="60 leicht · 62 mittel · 63 schwer (DIN 625-1)"),
+            M.Feld("spiel", "Passungsspiel", "mm", 0.1, 0.0, 2.0,
+                   gruppe="Wellen und Lager"),
+            M.Feld("muffe_b", "Breite der Schaltmuffe", "mm", 0.0, 0.0, 100.0,
+                   gruppe="Wellen und Lager",
+                   hinweis="0 = in die Lücke zwischen den Rädern einpassen"),
+            M.Feld("gehaeuse_luft", "Freigang Rad → Innenwand", "mm", 3.0,
+                   0.0, 100.0, gruppe="Gehäuse"),
+            M.Feld("wand", "Wandstärke", "mm", 4.0, 1.0, 100.0,
+                   gruppe="Gehäuse"),
+            M.Feld("flansch_b", "Flanschbreite", "mm", 12.0, 2.0, 100.0,
+                   gruppe="Gehäuse"),
+            M.Feld("schraube_d", "Schraubendurchmesser", "mm", 6.0, 2.0, 30.0,
+                   gruppe="Gehäuse"),
+        ]
+
+    def bauen(self, doc, werte):
+        import getriebe_fcgear as GF
+        k = GF.kennwerte(**werte)
+        FreeCAD.Console.PrintMessage(
+            "Schaltgetriebe: Achsabstand %.1f mm · Lager %s · Baulänge "
+            "%.1f mm\n" % (k["achsabstand"], k["lager"], k["baulaenge"]))
+        for nr, (z1, z2, i) in enumerate(k["gangpaare"], 1):
+            FreeCAD.Console.PrintMessage(
+                "  Gang %d: %d/%d Zähne, i = %.3f\n" % (nr, z1, z2, i))
+        return GF.baue_mit_werkstoff(doc=doc, **werte)
+
+
+class T2GLagerCommand(_MakroCommand):
+    """Ein Rillenkugellager nach DIN 625-1."""
+
+    titel = "Rillenkugellager DIN 625"
+    kennung = "lager"
+
+    def GetResources(self) -> dict:
+        return {
+            "MenuText": "Kugellager bauen …",
+            "ToolTip": "Rillenkugellager nach DIN 625-1: Innenring, "
+                       "Außenring, Wälzkörper, mit hinterlegtem Werkstoff",
+            "Pixmap": _icon("t2g-lager.svg"),
+        }
+
+    def felder(self, M):
+        import lager_din625 as LG
+        return [
+            M.Feld("bezeichnung", "Lager", "", "6204",
+                   auswahl=[z[0] for z in LG.TABELLE], gruppe="Lager",
+                   hinweis="Normmaße nach DIN 625-1: d, D, B und "
+                           "Kantenabstand"),
+            M.Feld("spiel", "Passungsspiel", "mm", 0.1, 0.0, 2.0,
+                   gruppe="Lager",
+                   hinweis="Bohrung wird um diesen Wert größer als d"),
+            M.Feld("kugeln", "Wälzkörper", "Stk", 0, 0, 30, gruppe="Lager",
+                   hinweis="0 = aus dem Laufkreis schätzen (nicht genormt)"),
+            M.Feld("werkstoff", "Werkstoff", "", "lagerstahl",
+                   auswahl=["lagerstahl", "stahl", "calculix-steel"],
+                   gruppe="Lager"),
+            M.Feld("achse", "Achsrichtung", "", "z", auswahl=["x", "y", "z"],
+                   gruppe="Lage"),
+            M.Feld("x", "x", "mm", 0.0, -10000.0, 10000.0, gruppe="Lage"),
+            M.Feld("y", "y", "mm", 0.0, -10000.0, 10000.0, gruppe="Lage"),
+            M.Feld("z", "z", "mm", 0.0, -10000.0, 10000.0, gruppe="Lage"),
+        ]
+
+    def bauen(self, doc, werte):
+        import lager_din625 as LG
+        return LG.baue_mit_werkstoff(doc=doc, **werte)
+
+
+class T2GGehaeuseCommand(_MakroCommand):
+    """Ein geteiltes Gehäuse, dessen Wand der Radkontur folgt."""
+
+    titel = "Getriebegehaeuse"
+    kennung = "gehaeuse"
+
+    def GetResources(self) -> dict:
+        return {
+            "MenuText": "Gehäuse bauen …",
+            "ToolTip": "Geteiltes Gehäuse mit Flansch, dessen Wand der "
+                       "Kontur der Zahnräder folgt",
+            "Pixmap": _icon("t2g-gehaeuse.svg"),
+        }
+
+    def felder(self, M):
+        achsabstand, r1, r2, breite = self._aus_auswahl()
+        return [
+            M.Feld("achsabstand", "Achsabstand", "mm", achsabstand, 1.0,
+                   2000.0, gruppe="Radsatz"),
+            M.Feld("radius_1", "Kopfradius Welle 1", "mm", r1, 1.0, 1000.0,
+                   gruppe="Radsatz"),
+            M.Feld("radius_2", "Kopfradius Welle 2", "mm", r2, 1.0, 1000.0,
+                   gruppe="Radsatz"),
+            M.Feld("breite", "Innenlänge (Wellenrichtung)", "mm", breite, 5.0,
+                   2000.0, gruppe="Radsatz"),
+            M.Feld("luft", "Freigang Rad → Innenwand", "mm", 3.0, 0.0, 100.0,
+                   gruppe="Gehäuse"),
+            M.Feld("wand", "Wandstärke", "mm", 4.0, 1.0, 100.0,
+                   gruppe="Gehäuse"),
+            M.Feld("welle_d", "Wellendurchlass", "mm", 0.0, 0.0, 500.0,
+                   gruppe="Gehäuse", hinweis="0 = keiner"),
+            M.Feld("flansch_b", "Flanschbreite", "mm", 12.0, 2.0, 100.0,
+                   gruppe="Flansch"),
+            M.Feld("schraube_d", "Schraubendurchmesser", "mm", 6.0, 2.0, 30.0,
+                   gruppe="Flansch"),
+            M.Feld("achse", "Wellenrichtung", "", "x", auswahl=["x", "y", "z"],
+                   gruppe="Gehäuse"),
+            M.Feld("werkstoff", "Werkstoff", "", "stahl",
+                   auswahl=["stahl", "calculix-steel", "lagerstahl"],
+                   gruppe="Gehäuse"),
+        ]
+
+    @staticmethod
+    def _aus_auswahl():
+        """Achsabstand, Kopfradien und Länge aus gewählten Rädern lesen."""
+        vorgabe = (48.0, 22.0, 30.0, 60.0)
+        formen = []
+        for name in _selection_names():
+            doc = _active_doc()
+            obj = doc.getObject(name) if doc is not None else None
+            shp = getattr(obj, "Shape", None)
+            if shp is not None and not shp.isNull() and shp.Solids:
+                formen.append(shp)
+        if len(formen) < 2:
+            return vorgabe
+        achsen = {}
+        laengen = []
+        for shp in formen:
+            b = shp.BoundBox
+            masse = [("x", b.XLength), ("y", b.YLength), ("z", b.ZLength)]
+            achse = min(masse, key=lambda t: t[1])
+            quer = [m for m in masse if m[0] != achse[0]]
+            mitte = {"x": (b.XMin + b.XMax) / 2.0,
+                     "y": (b.YMin + b.YMax) / 2.0,
+                     "z": (b.ZMin + b.ZMax) / 2.0}
+            schluessel = tuple(round(mitte[k], 2) for k, _v in quer)
+            r = max(v for _k, v in quer) / 2.0
+            achsen[schluessel] = max(achsen.get(schluessel, 0.0), r)
+            laengen.append(achse[1])
+        if len(achsen) < 2:
+            return vorgabe
+        sortiert = sorted(achsen)
+        a = max(abs(sortiert[-1][0] - sortiert[0][0]),
+                abs(sortiert[-1][1] - sortiert[0][1]))
+        return (a or 48.0, achsen[sortiert[0]], achsen[sortiert[-1]],
+                max(sum(laengen), 20.0))
+
+    def bauen(self, doc, werte):
+        import gehaeuse_kontur as GK
+        import werkstoff as W
+        teile = GK.baue([(0.0, 0.0), (0.0, float(werte["achsabstand"]))],
+                        [float(werte["radius_1"]), float(werte["radius_2"])],
+                        breite=werte["breite"], luft=werte["luft"],
+                        wand=werte["wand"], flansch_b=werte["flansch_b"],
+                        schraube_d=werte["schraube_d"],
+                        welle_d=werte["welle_d"], achse=werte["achse"])
+        objekte = []
+        for label, shp in teile:
+            o = doc.addObject("Part::Feature", "Gehaeuseteil")
+            o.Shape = shp
+            o.Label = label
+            objekte.append(o)
+        doc.recompute()
+        return objekte, W.zuweisen(objekte, werte["werkstoff"])
+
+
 # Register the commands (FreeCADGui is already imported above).
 FreeCADGui.addCommand("T2G_Panel", T2GPanelCommand())
 FreeCADGui.addCommand("T2G_Chat", T2GChatCommand())
@@ -5666,3 +5949,6 @@ FreeCADGui.addCommand("T2G_SkillBuild", T2GSkillBuildCommand())
 FreeCADGui.addCommand("T2G_SkillLearn", T2GSkillLearnCommand())
 FreeCADGui.addCommand("T2G_SkillDesign", T2GSkillDesignCommand())
 FreeCADGui.addCommand("T2G_ApiTest", T2GApiTestCommand())
+FreeCADGui.addCommand("T2G_Getriebe", T2GGetriebeCommand())
+FreeCADGui.addCommand("T2G_Lager", T2GLagerCommand())
+FreeCADGui.addCommand("T2G_Gehaeuse", T2GGehaeuseCommand())

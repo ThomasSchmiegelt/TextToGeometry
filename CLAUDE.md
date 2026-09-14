@@ -395,6 +395,15 @@ FCGear itself: `num_teeth` not `teeth`, `helix_angle` not `beta`, an
 `pitch_diameter` mean anything. The parameter objects are removed again after
 the shape is read — otherwise a dozen of them recompute on every change.
 
+Three workbench commands wrap the same `Tools/` functions as the macros:
+`T2G_Getriebe`, `T2G_Lager`, `T2G_Gehaeuse`, registered in `T2GCommand.py` and
+listed in the toolbar plus the *Konstruktion* submenu (`InitGui.py`). They share
+`_MakroCommand`, which puts `Tools/` on `sys.path`, shows the mask, builds and
+logs into the panel. Deliberately **not** threaded: the mask is modal and the
+build takes seconds, so a worker would only risk creating geometry off the GUI
+thread. The `.FCMacro` files stay — they are what works in a FreeCAD without
+this workbench.
+
 ### Fits, and why they matter to the checks
 
 Nothing in an assembly may be zero-clearance, because a zero fit is

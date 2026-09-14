@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>Kugellager bauen</title>
+  <rect x="1" y="1" width="30" height="30" rx="5" fill="#12303f" stroke="#081920" stroke-width="1"/>
+  <!-- Aussen- und Innenring -->
+  <circle cx="16" cy="16" r="12" fill="none" stroke="#7fd4f0" stroke-width="2.2"/>
+  <circle cx="16" cy="16" r="5.5" fill="none" stroke="#7fd4f0" stroke-width="2.2"/>
+  <!-- Waelzkoerper auf dem Laufkreis -->
+  <g fill="#39a8cc">
+    <circle cx="16" cy="7.2" r="2.1"/>
+    <circle cx="22.2" cy="9.8" r="2.1"/>
+    <circle cx="24.8" cy="16" r="2.1"/>
+    <circle cx="22.2" cy="22.2" r="2.1"/>
+    <circle cx="16" cy="24.8" r="2.1"/>
+    <circle cx="9.8" cy="22.2" r="2.1"/>
+    <circle cx="7.2" cy="16" r="2.1"/>
+    <circle cx="9.8" cy="9.8" r="2.1"/>
+  </g>
+</svg>

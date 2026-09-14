@@ -108,6 +108,44 @@ andere die Werkstatt, in der neue Teile entstehen.
 
 ---
 
+## 4a. Konstruktionsbefehle — ohne Sprachmodell
+
+Drei Befehle bauen aus Normdaten und Formeln, ganz ohne LLM. Sie stehen in
+der Symbolleiste, im Menü **TextToGeometry → Konstruktion** und zusätzlich als
+Makros im Makro-Menü.
+
+| Befehl | Was entsteht |
+|---|---|
+| **Getriebe bauen …** | Schaltgetriebe: Evolventenräder vom Add-on FCGear (gerade, schräg oder Pfeilverzahnung), Fest- und Losräder, Schaltmuffen, Wellen, Lager, geteiltes Gehäuse |
+| **Kugellager bauen …** | Rillenkugellager nach DIN 625-1, Reihen 60xx/62xx/63xx |
+| **Gehäuse bauen …** | Geteiltes Gehäuse mit Flansch, dessen Wand der Radkontur folgt |
+
+Jeder öffnet eine Maske mit mehreren Reitern. Was Sie eintragen, wird gemerkt
+und beim nächsten Mal wieder vorgelegt.
+
+**Das Getriebe in drei Schritten:** Symbolleiste → *Getriebe bauen …* →
+Gänge und Modul im ersten Reiter, Verzahnungsart im zweiten, dann *OK*.
+Nach zwei bis fünf Sekunden stehen rund 60 Bauteile im Dokument. Im
+Report-View steht der Achsabstand, die gewählte Lagerbezeichnung und die
+Zähnezahlen je Gang.
+
+**Was genormt ist und was nicht:** DIN 625 legt Bohrung, Außendurchmesser,
+Breite und Kantenabstand fest — mehr nicht. Kugelzahl und Kugeldurchmesser
+sind Herstellersache und werden hier aus dem Laufkreis geschätzt. Ein 6204
+bekommt neun Kugeln, das echte hat acht. Wer eine bestimmte Zahl braucht,
+trägt sie in der Maske ein.
+
+**Werkstoff:** Die Lager bekommen Wälzlagerstahl 100Cr6 hinterlegt
+(`ShapeMaterial`). Den gibt es in FreeCAD nicht, deshalb wird die Materialkarte
+beim ersten Aufruf in Ihrer Benutzerbibliothek angelegt. Klappt das nicht,
+wird `CalculiX-Steel` genommen — und das steht dann auch in der Meldung.
+
+**Was fehlt:** Synchronringe und Schaltgabeln. Die Schaltmuffen stehen alle in
+Neutralstellung. Am Übergang zwischen den beiden Gehäusekreisen sitzt eine
+Kante, keine gegossene Rundung.
+
+---
+
 ## 5. Rezepte
 
 ### Etwas am offenen Modell ändern

@@ -228,6 +228,42 @@ if hat_fcgear:
            % (dicht, rad_anfang - lager_ende))
     FreeCAD.closeDocument(doc.Name)
 
+# --- 6: In die Workbench integriert --------------------------------------
+log("\n--- Befehle der Workbench ---")
+import T2GCommand
+
+for kennung, klasse in (("T2G_Getriebe", T2GCommand.T2GGetriebeCommand),
+                        ("T2G_Lager", T2GCommand.T2GLagerCommand),
+                        ("T2G_Gehaeuse", T2GCommand.T2GGehaeuseCommand)):
+    befehl = klasse()
+    r = befehl.GetResources()
+    pixmap = r.get("Pixmap", "")
+    pruefe(bool(r.get("MenuText")) and bool(r.get("ToolTip")),
+           "%s hat Menuetext und Hinweis" % kennung)
+    pruefe(os.path.isfile(pixmap),
+           "%s: Symbol vorhanden (%s)" % (kennung, os.path.basename(pixmap)))
+    befehl._tools()
+    import t2g_maske as _M
+    felder = befehl.felder(_M)
+    pruefe(len(felder) >= 5,
+           "%s: Maske mit %d Feldern" % (kennung, len(felder)))
+    pruefe(len({f.gruppe for f in felder}) >= 1,
+           "%s: Felder in %d Gruppe(n)" % (kennung,
+                                           len({f.gruppe for f in felder})))
+
+# Der Befehl muss ohne GUI bauen koennen — frage_ab liefert dann die Vorgaben.
+doc = FreeCAD.newDocument("BefehlLager")
+befehl = T2GCommand.T2GLagerCommand()
+befehl._tools()
+import t2g_maske as _M
+werte = _M.vorgaben(befehl.felder(_M))
+objekte, meldung = befehl.bauen(doc, werte)
+pruefe(len(objekte) >= 5,
+       "T2G_Lager baut %d Koerper ueber den Befehlsweg" % len(objekte))
+pruefe("100Cr6" in meldung or "Steel" in meldung,
+       "Werkstoff gesetzt: %s" % meldung)
+FreeCAD.closeDocument(doc.Name)
+
 log("\nFEHLER: %d" % len(FEHLER))
 log("ALLE GRUEN" if not FEHLER else "FEHLGESCHLAGEN")
 if FEHLER:
