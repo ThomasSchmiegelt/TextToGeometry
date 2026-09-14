@@ -81,7 +81,7 @@ sync_src() {
 run_tests() {
     [ -x "$FREECAD_CMD" ] || fail "FreeCADCmd nicht gefunden: $FREECAD_CMD"
     local rc_all=0
-    for t in test_core.py test_ext.py test_skills.py test_chat.py test_learn.py test_project.py test_agent.py test_tools.py; do
+    for t in test_core.py test_ext.py test_skills.py test_chat.py test_learn.py test_project.py test_agent.py test_tools.py test_bauen.py; do
         say "Starte $t …"
         if ( cd "$DEV_DIR" && "$FREECAD_CMD" "$t"; ); then
             say "  ✔ $t PASS"

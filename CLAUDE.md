@@ -26,6 +26,7 @@ python3 test_learn.py   # 26 tests: research, skill learning, validation
 python3 test_project.py # 61 tests: project layout, AHP maths, matching, params, graph
 python3 test_agent.py   # 24 tests: agent protocol, action registry, run budget
 FreeCADCmd test_skills.py   # skills engine — needs the REAL Part module (see gotcha)
+FreeCADCmd test_bauen.py    # 24 checks: placement, replace, collisions, bearing, mesh phase
 FreeCADCmd Beispiele/getriebe_5gang.py   # reference gearbox; exits 1 if a promise breaks
 
 T2G_TEST_NET=1 python3 test_learn.py   # also exercises the live Wikipedia call
@@ -272,6 +273,31 @@ Two properties that keep it usable:
   Meshing gears genuinely intersect a little — 15/35 teeth at 50 mm centre
   distance must **not** be reported, two gears at the same place (100 %) must.
   Both are tested.
+
+### Fits, and why they matter to the checks
+
+Nothing in an assembly may be zero-clearance, because a zero fit is
+indistinguishable from a real error. `lager` and `zahnrad` therefore take a
+`spiel` parameter (default 0.1 mm): the bore comes out `2 × spiel` larger than
+the nominal shaft, and the bearing's raceway `spiel` wider than its balls. Before
+that, every shaft reported 3–5 % overlap with its own gears and bearings.
+
+`lager` is a real deep-groove ball bearing now — inner ring, outer ring and
+`kugeln` balls, **as separate solids**. Skills may return several solids, so
+anything filtering by part label must match the prefix `T2G <name> [`, not one
+exact label (`_kollisionen(nur=…)`, `_add_skill_shapes`, `_ausdehnung(ohne=…)`).
+
+`zahnrad` has a `phase` parameter (degrees) that turns the teeth without moving
+the bore. Two meshing gears need the driven one offset by **half a tooth pitch**
+(`180 / z2`); measured on 12/36 teeth at 48 mm centre distance, the penetration
+drops from 149.7 mm³ (5.6 %) to 0.6 mm³ (0.0 %). Without it, correct gearboxes
+trip the collision check.
+
+The reference gearbox checks penetration relatively (2 % of the smaller part,
+matching `_KOLL_TOL`), not absolutely — and that check immediately found a real
+error that had been in the hand-built reference all along: the bearings sat on
+the 15 mm shank instead of the 12 mm stepped seat, penetrating it by 419 mm³.
+Nobody had measured, because bore and seat were exactly equal.
 
 ### Parameters and the knowledge graph
 

@@ -2295,10 +2295,8 @@ class T2GPanel(QWidget):
             self._project.save()
         # What it touches matters as much as where it is: a part reported as
         # built is not built right if it sits inside its neighbour.
-        eigen = "T2G %s [1/%d]" % (gebaut, len(shapes))
+        eigen = "T2G %s [" % gebaut
         koll = self._kollisions_text(nur=eigen)
-        if not koll:
-            koll = self._kollisions_text(nur="T2G %s [1/1]" % gebaut)
         # The neighbourhood goes on EVERY build, not just on a collision: a
         # housing placed 300 mm away overlaps nothing at all, so a
         # collision-only message left exactly that mistake unreported.
@@ -2359,8 +2357,12 @@ class T2GPanel(QWidget):
         for i in range(len(teile)):
             for j in range(i + 1, len(teile)):
                 (la, sa), (lb, sb) = teile[i], teile[j]
-                if nur and nur not in (la, lb):
+                # Prefix, not equality: a skill may return several solids
+                # ("T2G lager [1/10]" … "[10/10]") and all of them count.
+                if nur and not (la.startswith(nur) or lb.startswith(nur)):
                     continue
+                if nur and la.startswith(nur) and lb.startswith(nur):
+                    continue          # parts of the same build, already checked
                 vol = cls._overlap(sa, sb)
                 if vol <= 1e-6:
                     continue
@@ -2393,25 +2395,13 @@ class T2GPanel(QWidget):
         WHERE the rest of the assembly actually sits.
         """
         kaesten = [shp.BoundBox for lab, shp in cls._doc_solids()
-                   if not (ohne and lab == ohne)]
+                   if not (ohne and lab.startswith(ohne))]
         if not kaesten:
             return ""
         return ("x %.0f..%.0f, y %.0f..%.0f, z %.0f..%.0f"
                 % (min(b.XMin for b in kaesten), max(b.XMax for b in kaesten),
                    min(b.YMin for b in kaesten), max(b.YMax for b in kaesten),
                    min(b.ZMin for b in kaesten), max(b.ZMax for b in kaesten)))
-
-    @classmethod
-    def _passt_nicht_text(cls, label: str) -> str:
-        """Where this part is versus where everything else is."""
-        eigen = [shp for lab, shp in cls._doc_solids() if lab == label]
-        rest = cls._ausdehnung(ohne=label)
-        if not eigen or not rest:
-            return ""
-        b = eigen[0].BoundBox
-        return ("dieses Teil deckt x %.0f..%.0f, y %.0f..%.0f, z %.0f..%.0f ab; "
-                "die uebrigen Bauteile liegen bei %s"
-                % (b.XMin, b.XMax, b.YMin, b.YMax, b.ZMin, b.ZMax, rest))
 
     def _act_kollision(self, action) -> str:
         text = self._kollisions_text()

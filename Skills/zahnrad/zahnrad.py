@@ -14,6 +14,8 @@ T2G_SKILL = {
         ("bohrung", "Bohrungsdurchmesser",  "mm", 15.0, 0.0,  400.0),
         ("nabe_d",  "Nabendurchmesser",     "mm", 26.0, 0.0,  600.0),
         ("nabe_b",  "Nabenbreite",          "mm", 16.0, 0.0,  300.0),
+        ("spiel",   "Passungsspiel Bohrung", "mm", 0.1,  0.0,  2.0),
+        ("phase",   "Verdrehung der Zaehne", "Grad", 0.0, -360.0, 360.0),
     ],
     "dependencies": ["Part", "FreeCAD"],
     "pruefregeln": ["konnektivitaet"],
@@ -44,15 +46,26 @@ def build(params):
     bohrung = float(params["bohrung"])
     nabe_d = float(params["nabe_d"])
     nabe_b = float(params["nabe_b"])
+    # Bohrung = Wellendurchmesser + Spiel. Exakt gleich gross ist geometrisch
+    # eine Nullpassung und taucht in der Baugruppenpruefung als 3-5 %
+    # Ueberschneidung auf, obwohl konstruktiv nichts falsch ist.
+    spiel = max(0.0, float(params.get("spiel", 0.0)))
+    if bohrung > 0.0:
+        bohrung += 2.0 * spiel
 
     r_teil = modul * zaehne / 2.0
     r_kopf = r_teil + modul
     r_fuss = max(0.6 * modul, r_teil - 1.25 * modul)
 
+    # Damit zwei Raeder kaemmen koennen, muss der Zahn des einen in die
+    # Luecke des anderen greifen. `phase` dreht die Verzahnung dafuer, ohne
+    # das Rad als Ganzes zu drehen (die Bohrung bleibt, wo sie ist).
+    phase = math.radians(float(params.get("phase", 0.0)))
+
     koerper = Part.makeCylinder(r_fuss, breite)
     for i in range(zaehne):
         zahn = _zahn_flaeche(r_fuss * 0.98, r_teil, r_kopf, modul, zaehne,
-                             2.0 * math.pi * i / zaehne)
+                             phase + 2.0 * math.pi * i / zaehne)
         koerper = koerper.fuse(zahn.extrude(FreeCAD.Vector(0, 0, breite)))
 
     # Nabe mittig zur Radbreite, falls sie ueber die Breite hinausragt

@@ -33,7 +33,7 @@ FILES = [
     "install.py", "LICENSE",
     "test_core.py", "test_ext.py", "test_skills.py", "test_chat.py",
     "test_learn.py", "test_project.py", "test_agent.py",
-    "test_tools.py",
+    "test_tools.py", "test_bauen.py",
 ]
 DIRS = ["Resources", "Skills", "Tools"]
 
