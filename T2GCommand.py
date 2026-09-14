@@ -1094,6 +1094,26 @@ class T2GPanel(QWidget):
             lambda _i: self._api_settings_save())
         form.addRow("Denktiefe:", self.api_thinking)
 
+        self.api_keepalive = QComboBox()
+        for label, value in (("5 Minuten (Ollama-Standard)", "5m"),
+                             ("30 Minuten (empfohlen)", "30m"),
+                             ("2 Stunden", "2h"),
+                             ("dauerhaft geladen", "-1"),
+                             ("sofort entladen", "0")):
+            self.api_keepalive.addItem(label, value)
+        idx = self.api_keepalive.findData(
+            (saved.keep_alive if saved and saved.keep_alive else "30m"))
+        self.api_keepalive.setCurrentIndex(max(0, idx))
+        self.api_keepalive.setToolTip(
+            "Wie lange Ollama das Modell im Speicher behält.\n"
+            "Gemessen an qwen-gross (17 GB): kalt 7,2 s, warm 0,9 s. "
+            "Mit dem Standard von 5 Minuten fällt das Modell zwischen zwei "
+            "Schritten heraus und muss neu von der Platte geladen werden – "
+            "das kostete hier bis zu 494 s für eine einzige Analyse.")
+        self.api_keepalive.currentIndexChanged.connect(
+            lambda _i: self._api_settings_save())
+        form.addRow("Modell im Speicher:", self.api_keepalive)
+
         self.api_timeout = QSpinBox()
         self.api_timeout.setRange(30, 3600)
         self.api_timeout.setSingleStep(30)
@@ -1152,6 +1172,7 @@ class T2GPanel(QWidget):
         key = prm.GetString("api_key", "")
         provider = prm.GetString("provider", "")
         thinking = prm.GetString("thinking", "")
+        keep_alive = prm.GetString("keep_alive", "")
         timeout = prm.GetInt("timeout_s", 0)
         if not (kind or base or model or key or provider):
             return None
@@ -1159,6 +1180,7 @@ class T2GPanel(QWidget):
                                  model=model, api_key=key,
                                  provider=provider or "ollama",
                                  thinking=thinking or "low",
+                                 keep_alive=keep_alive or "30m",
                                  timeout_s=timeout or 900)
 
     def _api_settings_save(self) -> None:
@@ -1174,6 +1196,8 @@ class T2GPanel(QWidget):
                                    if hasattr(self, "api_provider") else ""))
         prm.SetString("thinking", (self.api_thinking.currentData()
                                    if hasattr(self, "api_thinking") else ""))
+        prm.SetString("keep_alive", (self.api_keepalive.currentData()
+                                     if hasattr(self, "api_keepalive") else ""))
         prm.SetInt("timeout_s", int(self.api_timeout.value()))
         if getattr(self, "api_remember", None) is not None and self.api_remember.isChecked():
             prm.SetString("api_key", self.api_key.text())
@@ -1253,6 +1277,8 @@ class T2GPanel(QWidget):
                       if hasattr(self, "api_provider") else "ollama"),
             thinking=(self.api_thinking.currentData()
                       if hasattr(self, "api_thinking") else "low"),
+            keep_alive=(self.api_keepalive.currentData()
+                        if hasattr(self, "api_keepalive") else "30m"),
             timeout_s=int(self.api_timeout.value()) if hasattr(self, "api_timeout") else 900,
         )
 
@@ -1750,7 +1776,10 @@ class T2GPanel(QWidget):
             if cfg.model and cfg.model not in geladen:
                 self.progress_label.setText(
                     "Modell „%s“ wird erst in den Speicher geladen – das "
-                    "dauert beim ersten Mal ein bis drei Minuten." % cfg.model)
+                    "dauert beim ersten Mal ein bis drei Minuten. Danach "
+                    "bleibt es %s geladen (Tab „Backend“)."
+                    % (cfg.model, self.api_keepalive.currentText()
+                       if hasattr(self, "api_keepalive") else "30 Minuten"))
         except Exception:  # noqa: BLE001
             pass
 

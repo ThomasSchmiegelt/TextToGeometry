@@ -299,6 +299,14 @@ When nothing has arrived after 8 s, `_note_model_loading()` checks
 disk -- a cold 17 GB model really does take minutes, and that once looked like
 a hang for 283 s.
 
+`APIConfig.keep_alive` (default `"30m"`) is sent with every Ollama request.
+Ollama's own default evicts a model after five minutes, which is shorter than
+the gap between two steps of a long job — the model then reloads 17 GB per
+call. Measured: short call 7.2 s cold versus 0.9 s warm; one skill analysis
+494 s versus 18 s; a whole skill learned 116 s versus 56 s. It is a per-request
+field, so no root and no systemd edit is needed; the panel exposes it under
+*Modell im Speicher*.
+
 `_CODE_THINKING` lifts the panel's thinking level by one step for code
 generation instead of pinning it to "high": a plain washer took minutes at
 "high" and 116 s at "medium".

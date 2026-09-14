@@ -157,6 +157,11 @@ class APIConfig:
     #: step: off 1.2 s, low 2.0 s, high 3.9 s -- so short steps get "low" and
     #: only geometry code is worth the wait.
     thinking: str = "low"
+    #: How long Ollama keeps the model in memory after a call. The default of
+    #: five minutes expires between two steps of a long job, and reloading a
+    #: 17 GB model off disk then costs minutes -- measured 494 s for a single
+    #: analysis. Sent per request, so no system configuration is needed.
+    keep_alive: str = "30m"
     temperature: float = 0.2
     max_tokens: int = 8192
     # A 27B model writing a full parametric part needs minutes, not seconds.
@@ -167,6 +172,7 @@ class APIConfig:
             "kind": self.kind, "base_url": self.base_url,
             "model": self.model, "api_key": self.api_key,
             "provider": self.provider, "thinking": self.thinking,
+            "keep_alive": self.keep_alive,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens, "timeout_s": self.timeout_s,
         }
@@ -231,6 +237,8 @@ def _stream_api_call(cfg: APIConfig, system_prompt: str, user_prompt: str,
         think = _thinking_for_ollama(cfg.thinking if thinking is None else thinking)
         if think is not None:
             body["think"] = think
+        if cfg.keep_alive:
+            body["keep_alive"] = cfg.keep_alive
         headers = {"Content-Type": "application/json"}
     else:
         url = cfg.base_url.rstrip("/")
@@ -323,6 +331,8 @@ def _t2g_api_call(cfg: APIConfig, system_prompt: str, user_prompt: str,
             cfg.thinking if thinking is None else thinking)
         if think is not None:
             body["think"] = think
+        if cfg.keep_alive:
+            body["keep_alive"] = cfg.keep_alive
         headers = {"Content-Type": "application/json"}
     else:
         url = cfg.base_url.rstrip("/")

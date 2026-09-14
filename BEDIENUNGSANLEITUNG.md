@@ -254,6 +254,26 @@ Bleibt es acht Sekunden still, prüft die Workbench nach, ob Ollama das Modell
 das dauert beim ersten Mal ein bis drei Minuten."* Ein kalter Start eines
 27B-Modells kostet echte Minuten; danach ist es schnell.
 
+### Modell im Speicher halten — der größte Hebel
+
+Ollama wirft ein Modell nach **fünf Minuten** Untätigkeit aus dem Speicher.
+Zwischen zwei Schritten eines längeren Auftrags reicht das nicht: Der nächste
+Aufruf lädt 17 GB neu von der Platte.
+
+Die Workbench schickt deshalb bei jeder Anfrage mit, wie lange das Modell
+geladen bleiben soll — einstellbar im Tab **Backend** unter *Modell im
+Speicher* (Standard 30 Minuten). Gemessen an `qwen-gross`:
+
+| | kalt | warm |
+|---|---:|---:|
+| kurzer Aufruf | 7,2 s | **0,9 s** |
+| Analyse eines Skills | 494 s | **18 s** |
+| ein Skill komplett gelernt | 116 s | **56 s** |
+
+Es braucht dafür keine Systemeinstellung und keine Administratorrechte. Wer es
+dennoch systemweit setzen will: `OLLAMA_KEEP_ALIVE=30m` in der
+systemd-Unit von Ollama.
+
 ### Warum Sie pi meiden sollten
 
 Auf diesem Rechner gemessen, gleicher Prompt, gleiches Modell:
