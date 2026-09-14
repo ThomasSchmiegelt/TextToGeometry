@@ -65,9 +65,21 @@ class Panel(object):
         return T2GSkills.SkillEngine(
             T2GSkills.SkillEngine._default_skills_dir()).load_all()
 
+    # Alles, was ein Widget anfasst, ist hier eine Attrappe.
+    def _prj_show_skill_status(self, *a, **k):
+        pass
+
+    def _prj_show(self, *a, **k):
+        pass
+
+    def _chat_append(self, *a, **k):
+        pass
+
 
 for _name, _wert in _P.__dict__.items():
-    if _name.startswith("__") or _name in ("_skills_engine", "_project"):
+    if _name.startswith("__") or _name in (
+            "_skills_engine", "_project", "_prj_show_skill_status",
+            "_prj_show", "_chat_append"):
         continue
     setattr(Panel, _name, _wert)
 
@@ -119,9 +131,11 @@ try:
 except T2GSkills.SkillError as e:
     pruefe("zahnrad" in str(e),
            "Fehlermeldung nennt die vorhandenen Skills")
+import uuid
 import T2GProject
-prj = T2GProject.Project.create(os.environ.get("T2G_TEST_PRJ", "/tmp"),
-                                "Bautest %d" % os.getpid())
+prj = T2GProject.Project.create(
+    os.environ.get("T2G_TEST_PRJ", "/tmp"),
+    "Bautest " + uuid.uuid4().hex[:8])
 prj.skills = [T2GProject.SkillNeed(name="zahnrad_3", status="kopiert",
                                    source="zahnrad")]
 p._project = prj
@@ -258,6 +272,23 @@ pruefe("ACHTUNG" not in r, "kollisionsfrei")
 r = p._act_skill_bauen(Aktion("zahnrad", "als=probe", "x=300"))
 pruefe("gebaut" in r and "Bauteil(e)" not in r,
        "ein vorhandener Skill wird weiter als Skill gebaut")
+
+# --- 9: Hinweis an der Entscheidungsstelle -------------------------------
+log("\n--- Hinweis beim Anlegen der Baugruppe ---")
+FreeCAD.newDocument("Hinweis")
+p = Panel()
+p._tools = T2GTools.discover_python_tools([os.path.join(HERE, "Tools")])
+p._agent_run = None
+p._project = T2GProject.Project.create(
+    os.environ.get("T2G_TEST_PRJ", "/tmp"),
+    "Hinweis " + uuid.uuid4().hex[:8])
+r = p._act_baugruppe(Aktion("Getriebe", "welle_ein", "welle_aus", "rad_1"))
+pruefe("HINWEIS" in r and "skill_bauen: getriebe" in r,
+       "Baugruppe „Getriebe“ nennt das Werkzeug")
+r = p._act_baugruppe(Aktion("Tischlampe", "fuss", "schirm"))
+pruefe("HINWEIS" not in r,
+       "eine unbeteiligte Baugruppe bekommt keinen Hinweis")
+p._project = None
 
 log("\nFEHLER: %d" % len(FEHLER))
 log("ALLE GRUEN" if not FEHLER else "FEHLGESCHLAGEN")

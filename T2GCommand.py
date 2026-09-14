@@ -2186,8 +2186,37 @@ class T2GPanel(QWidget):
             self._project.save()
             self._prj_show_skill_status()
         return ("Baugruppe „%s“ mit %d Platzhalter(n) im Dokument: %s. "
-                "Jedes Teil wird gefüllt, sobald sein Skill steht."
-                % (name, len(angelegt), ", ".join(angelegt)))
+                "Jedes Teil wird gefüllt, sobald sein Skill steht.%s"
+                % (name, len(angelegt), ", ".join(angelegt),
+                   self._werkzeug_hinweis(name, angelegt)))
+
+    def _werkzeug_hinweis(self, name: str, teile: list) -> str:
+        """Name the assembly builder at the moment the assembly is created.
+
+        Ten runs in a row the model set seventeen parts by hand while
+        `getriebe.baue` sat first in the tool list, was named in the SKILLS
+        block and reachable through `skill_bauen`. Prompting harder had no
+        effect; an observation AT THE DECISION POINT does, because it arrives
+        as a result of what it just did rather than as advice it read earlier.
+        """
+        if not getattr(self, "_tools", None):
+            return ""
+        heu = " ".join([name] + list(teile)).lower()
+        ziel = (self._agent_run.goal.lower()
+                if getattr(self, "_agent_run", None) is not None else "")
+        for t in self._tools:
+            if t.kind != "python" or t.entry not in ("baue", "build"):
+                continue
+            modul = t.name.split(".")[0].lower()
+            if modul in heu or modul in ziel:
+                return ("\n\nHINWEIS: Für genau diese Baugruppe gibt es ein "
+                        "Werkzeug. Ein Aufruf baut alle Teile fertig "
+                        "platziert, mit gerechnetem Achsabstand, Zähnezahlen "
+                        "und Gehäusemaßen – statt %d Einzelteilen:\n"
+                        "  skill_bauen: %s;<arg=wert>\n"
+                        "  %s%s"
+                        % (len(teile), modul, modul, t.signature or ""))
+        return ""
 
     def _external(self, name: str):
         if not getattr(self, "_tools", None):

@@ -309,6 +309,12 @@ the model reaches for `skill_bauen` whatever the prompt says. So the builder is
 that name exists, and assembly builders are listed inside the SKILLS block too.
 Fighting the model's habit loses; moving the target wins.
 
+Even that was not enough on its own. What finally lands is an observation **at
+the decision point**: `_werkzeug_hinweis()` appends to the result of
+`baugruppe:` — the very step where the model commits to seventeen parts — a line
+naming the builder and its signature. Advice read earlier in the prompt competes
+with everything else in it; a result of what the agent just did does not.
+
 ### Ending a run on facts, not on wording
 
 `_agent_finish` had two guards, both keyed on word lists (`_PROMISE_WORDS`,
