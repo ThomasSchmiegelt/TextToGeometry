@@ -2517,8 +2517,12 @@ class T2GPanel(QWidget):
                 self._tools_scan()
             except Exception:  # noqa: BLE001
                 pass
-        werkzeuge = T2GTools.describe_tools(
-            [t for t in (self._tools or []) if t.kind != "addon"], limit=25)
+        # Python-Werkzeuge zuerst: nur die nehmen Argumente entgegen und
+        # koennen eine ganze Baugruppe liefern. Vorher standen vierzehn
+        # FCGear-Befehle davor und `getriebe.baue` auf Platz 15.
+        brauchbar = [t for t in (self._tools or []) if t.kind != "addon"]
+        brauchbar.sort(key=lambda t: 0 if t.kind == "python" else 1)
+        werkzeuge = T2GTools.describe_tools(brauchbar, limit=40)
         prompt = T2GAgent.build_agent_prompt(
             run, pblock, ctx, skills=skills,
             answered=getattr(run, "answered", ""), tools=werkzeuge)
@@ -2860,6 +2864,41 @@ class T2GPanel(QWidget):
                 "Fehlermeldung.")])
             self._chat_append("System",
                               "Nichts gebaut – fordere die Ausführung an.")
+            return self._agent_step()
+        # Wording-based guards miss what they were not told about: a run ended
+        # after two steps on "Abhaengigkeiten eingetragen. Naechster Schritt:
+        # Zahnraeder bauen" -- no promise word, no build word, 17 parts still
+        # open and an empty document. So check the FACTS, not the phrasing.
+        offen = []
+        if run is not None and self._project is not None:
+            offen = [sk.name for sk in self._project.skills
+                     if sk.status in ("offen", "zu pruefen")]
+        nichts_gebaut = (run is not None
+                         and self._doc_solid_count()
+                         <= getattr(run, "solids_at_start", 0))
+        if run is not None and run.budget_left() > 0 \
+                and getattr(run, "build_checks", 0) < self._MAX_BUILD_CHECKS \
+                and (offen or nichts_gebaut):
+            run.build_checks = getattr(run, "build_checks", 0) + 1
+            grund = []
+            if nichts_gebaut:
+                grund.append("Im Dokument ist kein einziger Körper entstanden")
+            if offen:
+                grund.append("noch nicht gebaut: " + ", ".join(offen[:12])
+                             + (" …" if len(offen) > 12 else ""))
+            run.add_observations([T2GAgent.Observation(
+                "pruefung", False,
+                "%s. Der Auftrag ist damit nicht erledigt. Bau es jetzt: "
+                "gibt es unter WERKZEUGE eine Funktion, die die ganze "
+                "Baugruppe liefert, dann `werkzeug_aufrufen: "
+                "modul.funktion;arg=wert` – sonst `skill_bauen: "
+                "<skill>;als=<bauteil>;x=..;y=..;z=..` für jedes Teil. "
+                "```fertig ist erst dran, wenn die Teile im Dokument stehen."
+                % "; ".join(grund))])
+            self._chat_append("System",
+                              "Noch nichts im Dokument – fordere die "
+                              "Ausführung an (%d/%d)."
+                              % (run.build_checks, self._MAX_BUILD_CHECKS))
             return self._agent_step()
         self._agent_busy(False)
         if run is not None:

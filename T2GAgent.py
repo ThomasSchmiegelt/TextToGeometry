@@ -273,7 +273,11 @@ def build_agent_prompt(run: "AgentRun", project_block: str, doc_context: str,
                   "passt sie nicht zur Lage im Dokument, mit dreh_x/y/z beim "
                   "skill_bauen drehen)", block, ""]
     if tools.strip():
-        parts += ["WERKZEUGE DIESER INSTALLATION (statt selbst nachbauen)",
+        parts += ["WERKZEUGE DIESER INSTALLATION (statt selbst nachbauen). "
+                  "Liefert eine Funktion die ganze Baugruppe, dann rufe SIE "
+                  "auf, statt die Teile einzeln zu setzen - sie rechnet die "
+                  "Masse und Lagen selbst:\n"
+                  "  werkzeug_aufrufen: modul.funktion;arg=wert;arg=wert",
                   tools.strip(), ""]
     if run.goal:
         parts += ["AUFTRAG DES BENUTZERS", run.goal.strip(), ""]
