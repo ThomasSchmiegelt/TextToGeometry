@@ -2295,14 +2295,20 @@ class T2GPanel(QWidget):
             self._project.save()
         # What it touches matters as much as where it is: a part reported as
         # built is not built right if it sits inside its neighbour.
-        koll = self._kollisions_text(nur="T2G %s [1/%d]" % (gebaut, len(shapes)))
+        eigen = "T2G %s [1/%d]" % (gebaut, len(shapes))
+        koll = self._kollisions_text(nur=eigen)
         if not koll:
             koll = self._kollisions_text(nur="T2G %s [1/1]" % gebaut)
-        return "%s gebaut%s: %s%s%s" % (
+        # The neighbourhood goes on EVERY build, not just on a collision: a
+        # housing placed 300 mm away overlaps nothing at all, so a
+        # collision-only message left exactly that mistake unreported.
+        rest = self._ausdehnung(ohne=eigen)
+        return "%s gebaut%s: %s%s%s%s" % (
             gebaut,
             (" (Skill %s)" % name) if gebaut != name else "",
             self._describe_build(shapes, platz),
             (" · Hinweise: " + "; ".join(problems)) if problems else "",
+            (" · uebrige Bauteile liegen bei " + rest) if rest else "",
             (" · ACHTUNG " + koll) if koll else "")
 
     #: An overlap below this share of the smaller part is a fit, not a clash.
@@ -2378,12 +2384,42 @@ class T2GPanel(QWidget):
             zeilen.append("… und %d weitere" % (len(treffer) - limit))
         return "; ".join(zeilen)
 
+    @classmethod
+    def _ausdehnung(cls, ohne: str = "") -> str:
+        """The box the assembly occupies, optionally ignoring one part.
+
+        "Es kollidiert" alone was not enough to repair a housing: the agent
+        knew *that* it was wrong and still missed twice, because nothing said
+        WHERE the rest of the assembly actually sits.
+        """
+        kaesten = [shp.BoundBox for lab, shp in cls._doc_solids()
+                   if not (ohne and lab == ohne)]
+        if not kaesten:
+            return ""
+        return ("x %.0f..%.0f, y %.0f..%.0f, z %.0f..%.0f"
+                % (min(b.XMin for b in kaesten), max(b.XMax for b in kaesten),
+                   min(b.YMin for b in kaesten), max(b.YMax for b in kaesten),
+                   min(b.ZMin for b in kaesten), max(b.ZMax for b in kaesten)))
+
+    @classmethod
+    def _passt_nicht_text(cls, label: str) -> str:
+        """Where this part is versus where everything else is."""
+        eigen = [shp for lab, shp in cls._doc_solids() if lab == label]
+        rest = cls._ausdehnung(ohne=label)
+        if not eigen or not rest:
+            return ""
+        b = eigen[0].BoundBox
+        return ("dieses Teil deckt x %.0f..%.0f, y %.0f..%.0f, z %.0f..%.0f ab; "
+                "die uebrigen Bauteile liegen bei %s"
+                % (b.XMin, b.XMax, b.YMin, b.YMax, b.ZMin, b.ZMax, rest))
+
     def _act_kollision(self, action) -> str:
         text = self._kollisions_text()
+        rest = self._ausdehnung()
         if not text:
-            return ("keine Ueberschneidungen: alle %d Koerper stehen frei"
-                    % len(self._doc_solids()))
-        return "ueberschneidungen: " + text
+            return ("keine Ueberschneidungen: alle %d Koerper stehen frei; "
+                    "Baugruppe belegt %s" % (len(self._doc_solids()), rest))
+        return "ueberschneidungen: %s · Baugruppe belegt %s" % (text, rest)
 
     def _place_shape(self, shp, platz: dict):
         """Move and turn a freshly built shape -- without touching its volume.

@@ -256,6 +256,14 @@ so nothing ever noticed they were stacked. `T2GPanel._kollisionen()` checks ever
 solid in the document against every other; `skill_bauen` appends an `ACHTUNG`
 line for the part it just built, and the `kollision:` action checks everything.
 
+Every build also reports `uebrige Bauteile liegen bei x …, y …, z …`
+(`_ausdehnung()`), and `kollision:` reports the whole assembly's box. That line
+goes on **every** build, not only on a collision: a housing placed 300 mm away
+overlaps nothing at all, so a collision-only message left exactly that mistake
+unreported. "It collides" was not enough to repair a housing — the agent knew it
+was wrong and still missed twice, because nothing said where the rest actually
+sits.
+
 Two properties that keep it usable:
 - `_overlap()` prefilters with `BoundBox.intersect` — 26 bodies are 325 boolean
   commons, minutes of work; the box test rejects nearly all of them and the

@@ -2746,6 +2746,13 @@ ARBEITSWEISE
   nicht fuenfmal dieselbe. Am Ende einmal `kollision:` ueber alles.
   Kaemmende Zahnraeder duerfen sich leicht beruehren - Prozentwerte im
   zweistelligen Bereich heissen, dass zwei Teile am selben Platz stehen.
+- Ein umschliessendes Teil (Gehaeuse, Deckel) muss die uebrigen Bauteile
+  wirklich umschliessen. Die Meldung nennt beide Bereiche: was das Teil
+  abdeckt und wo die anderen liegen. Innenmasse aus deren Ausdehnung plus
+  Freiraum rechnen, und x/y/z so setzen, dass die Bereiche uebereinander
+  liegen - ein Gehaeuse bei x 26..134 um ein Getriebe bei x -32..77 ist
+  falsch, auch wenn die Masse stimmen. Jede Baumeldung nennt dafuer
+  "uebrige Bauteile liegen bei ..." - damit vergleichen.
 - Teile NIE mit einem ```python-Block verschieben oder verschmelzen. Dafür ist
   `skill_bauen` mit x/y/z da; freie Geometrie-Blöcke haben Zahnräder schon
   zerstört (Volumen verfünffacht, statt sie zu bewegen).
