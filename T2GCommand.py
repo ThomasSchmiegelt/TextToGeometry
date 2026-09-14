@@ -2216,18 +2216,56 @@ class T2GPanel(QWidget):
             "über „Python-Ordner hinzufügen …“ einbinden. Versuche: "
             + "; ".join(fehler))
 
+    #: Placement keys understood by `skill_bauen`, in millimetres / degrees.
+    _PLACE_KEYS = ("x", "y", "z", "dreh_x", "dreh_y", "dreh_z")
+
+    def _resolve_skill_name(self, eng, name: str) -> str:
+        """Map a project part name onto the library skill that builds it.
+
+        The agent works with part names (`zahnrad_3`) but the registry holds
+        generator names (`zahnrad`). Without this every instance of a copied
+        skill came back as "unknown skill" and whole steps were burnt on it.
+        """
+        if name in eng.registry.names():
+            return name
+        if self._project is not None:
+            for sneed in self._project.skills:
+                if sneed.name != name:
+                    continue
+                quelle = (sneed.source or "").strip()
+                if quelle and quelle in eng.registry.names():
+                    return quelle
+                break
+        stamm = name.rsplit("_", 1)[0]
+        if stamm != name and stamm in eng.registry.names():
+            return stamm
+        raise T2GSkills.SkillError(
+            "unbekannter Skill %r. Vorhanden: %s. Bauteilnamen wie "
+            "'zahnrad_3' sind keine Skills - bau den Skill 'zahnrad' und gib "
+            "die Stelle mit als=zahnrad_3;x=..;y=..;z=.. an."
+            % (name, ", ".join(eng.registry.names()) or "keine"))
+
     def _act_skill_bauen(self, action) -> str:
-        name = action.arg(0)
+        roh = action.arg(0)
         eng = self._skills_engine(reload=True)
+        name = self._resolve_skill_name(eng, roh)
         values = {}
+        platz = {}
+        label = ""
         for raw in action.args[1:]:
             if "=" not in raw:
                 continue
             k, v = raw.split("=", 1)
+            k = k.strip()
+            v = v.strip()
+            if k in ("als", "name", "bauteil"):
+                label = v
+                continue
+            ziel = platz if k in self._PLACE_KEYS else values
             try:
-                values[k.strip()] = float(v.strip().replace(",", "."))
+                ziel[k] = float(v.replace(",", "."))
             except ValueError:
-                values[k.strip()] = v.strip()
+                ziel[k] = v
         # project parameters fill in whatever the agent did not name
         if self._project is not None:
             for pname, pval in self._project.param_values().items():
@@ -2236,15 +2274,47 @@ class T2GPanel(QWidget):
         known = {q.name for q in loaded.definition.params}
         values = {k: v for k, v in values.items() if k in known}
         shapes, vals, problems = eng.build(name, values)
-        self._add_skill_shapes(name, shapes, problems)
+        shapes = [self._place_shape(shp, platz) for shp in shapes]
+        gebaut = label or (roh if roh != name else name)
+        self._add_skill_shapes(gebaut, shapes, problems)
         if self._project is not None:
             for sneed in self._project.skills:
-                if sneed.name == name and sneed.status in ("offen", "zu pruefen"):
+                if sneed.name in (gebaut, roh, name) and sneed.status != "gelernt":
                     sneed.status = "gebaut"
             self._project.save()
-        return "%s gebaut: %s%s" % (
-            name, self._describe_build(shapes),
+        return "%s gebaut%s: %s%s" % (
+            gebaut,
+            (" (Skill %s)" % name) if gebaut != name else "",
+            self._describe_build(shapes, platz),
             (" · Hinweise: " + "; ".join(problems)) if problems else "")
+
+    def _place_shape(self, shp, platz: dict):
+        """Move and turn a freshly built shape -- without touching its volume.
+
+        Positioning used to be left to free-form ```python, where the model
+        fused helper blocks into the part instead of moving it (a 44 mm gear
+        came back 64 mm and 5x the volume). A copied, placed shape cannot do
+        that.
+        """
+        if not platz:
+            return shp
+        try:
+            kopie = shp.copy()
+            pl = kopie.Placement
+            pl.Base = FreeCAD.Vector(float(platz.get("x", pl.Base.x)),
+                                     float(platz.get("y", pl.Base.y)),
+                                     float(platz.get("z", pl.Base.z)))
+            for achse, schluessel in ((FreeCAD.Vector(1, 0, 0), "dreh_x"),
+                                      (FreeCAD.Vector(0, 1, 0), "dreh_y"),
+                                      (FreeCAD.Vector(0, 0, 1), "dreh_z")):
+                winkel = float(platz.get(schluessel, 0.0) or 0.0)
+                if winkel:
+                    pl.Rotation = (FreeCAD.Rotation(achse, winkel)
+                                   .multiply(pl.Rotation))
+            kopie.Placement = pl
+            return kopie
+        except Exception:  # noqa: BLE001 - placement must never lose the part
+            return shp
 
     # ------------------------------------------------------------- agent --
 
@@ -3658,6 +3728,12 @@ class T2GPanel(QWidget):
             self.start_status.setText("Bitte zuerst beschreiben, was gebaut "
                                       "werden soll.")
             return
+        # A run started here is a new job: no leftovers from the project that
+        # happened to be restored at startup, or the agent inherits its
+        # parameters and its transcript.
+        self._project = None
+        self._reset_session()
+        self._prj_show()
         self.chat_steps.setValue(self.start_auto_steps.value())
         self.chat_agent_mode.setChecked(True)
         self.main_tabs.setCurrentWidget(self.tab_chat)
@@ -4786,8 +4862,8 @@ class T2GPanel(QWidget):
         return box
 
     @staticmethod
-    def _describe_build(shapes: list) -> str:
-        """One line about what a skill currently produces."""
+    def _describe_build(shapes: list, platz: "dict | None" = None) -> str:
+        """One line about what a skill currently produces, and where."""
         if not shapes:
             return "keine Solids"
         try:
@@ -4797,10 +4873,17 @@ class T2GPanel(QWidget):
                   min(b.ZMin for b in xs))
             hi = (max(b.XMax for b in xs), max(b.YMax for b in xs),
                   max(b.ZMax for b in xs))
-            return ("%d Solid(s), Volumen %.0f mm^3, Hüllquader "
+            text = ("%d Solid(s), Volumen %.0f mm^3, Hüllquader "
                     "%.0f x %.0f x %.0f mm"
                     % (len(shapes), vol, hi[0] - lo[0], hi[1] - lo[1],
                        hi[2] - lo[2]))
+            # Where it sits matters as much as how big it is: without this the
+            # agent cannot tell ten stacked parts from ten placed ones.
+            text += (" bei x %.0f..%.0f, y %.0f..%.0f, z %.0f..%.0f"
+                     % (lo[0], hi[0], lo[1], hi[1], lo[2], hi[2]))
+            if not platz:
+                text += " (ohne Angabe im Ursprung)"
+            return text
         except Exception:  # noqa: BLE001
             return "%d Solid(s)" % len(shapes)
 

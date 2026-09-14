@@ -2694,7 +2694,10 @@ AKTIONEN
   agent_d:
   skill_lernen: name
   werkzeug_erzeugen: name
-  skill_bauen: name;param=wert;param=wert
+  skill_bauen: skill;als=bauteil;x=..;y=..;z=..;dreh_x=..;param=wert
+      `skill` ist der Name aus SKILLS (zahnrad), nicht der Bauteilname.
+      Mehrere Exemplare: denselben Skill mehrfach bauen, jedes mit
+      eigenem `als=` und eigener Stelle. x/y/z in mm, dreh_* in Grad.
   makro: Name                     ein vorhandenes FreeCAD-Makro ausführen
   befehl: FCGear_InvoluteGear     einen Add-on-Befehl auslösen
   werkzeug_aufrufen: modul.funktion;arg=wert
@@ -2733,6 +2736,12 @@ ARBEITSWEISE
   -> `skill_bedarf`/`werkzeug_bedarf` -> `abhaengigkeit` -> `agent_d`.
 - Sobald ein Skill fertig ist, ihn mit `skill_bauen` ins Dokument setzen -
   was man nicht sieht, kann der Benutzer nicht beurteilen.
+- JEDES Teil bekommt beim Bauen seine Stelle mit (`x=`/`y=`/`z=`/`dreh_*`).
+  Ohne Angabe liegt alles im Ursprung ineinander. Die Rückmeldung nennt die
+  tatsächliche Lage - stimmt sie nicht, im nächsten Schritt neu bauen.
+- Teile NIE mit einem ```python-Block verschieben oder verschmelzen. Dafür ist
+  `skill_bauen` mit x/y/z da; freie Geometrie-Blöcke haben Zahnräder schon
+  zerstört (Volumen verfünffacht, statt sie zu bewegen).
 - Nach dem Bauen prüfen, was die Rückmeldung sagt: Zahl der Solids, Volumen,
   Hinweise. Schlägt etwas fehl, den Fehler lesen und im nächsten Schritt
   beheben (Parameter korrigieren, `skill_verfeinern`, oder einen berichtigten
@@ -2743,7 +2752,8 @@ ARBEITSWEISE
 - Was du nicht sicher weißt und was eine Zahl ist: ```maske. Keine erfundenen
   Maße als gesetzt ausgeben - offene Felder leer lassen.
 - `skill_lernen`, `werkzeug_erzeugen`, `skill_verfeinern` dauern Minuten.
-  Frage vorher nach, statt mehrere davon ungefragt hintereinander zu starten.
+  Höchstens einen davon pro Schritt. Fehlt ein Skill, dann lerne ihn - Fragen
+  und Nebenarbeiten ersetzen das nicht.
 - Vorhandene Skills wiederverwenden (`skills_kopieren`), statt alles neu zu
   lernen. Dasselbe gilt für die Werkzeuge dieser Installation: Zahnräder macht
   das Add-on besser als ein neuer Skill (`befehl: FCGear_InvoluteGear`), und
