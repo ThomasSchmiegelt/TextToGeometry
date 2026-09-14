@@ -2475,8 +2475,13 @@ class T2GPanel(QWidget):
 
     @classmethod
     def _clean_title(cls, text: str, fallback: str = "Projekt") -> str:
-        """A usable project name from a spoken instruction."""
-        words = re.findall(r"[A-Za-zÄÖÜäöüß0-9_]+", text or "")
+        """A usable project name from a spoken instruction.
+
+        Only the first sentence counts: a long brief otherwise produced names
+        like "getriebe_gaengen_uebersetzungen_sind".
+        """
+        erster = re.split(r"[.!?\n,;]", (text or "").strip(), 1)[0]
+        words = re.findall(r"[A-Za-zÄÖÜäöüß0-9_]+", erster or text or "")
         kept = [w for w in words
                 if w.lower() not in cls._TITLE_NOISE and not w.isdigit()]
         # "6 modellen" and friends add nothing to a name

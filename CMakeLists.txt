@@ -36,11 +36,17 @@ IF (BUILD_GUI)
         Resources/drawings/bridge.svg
         Resources/licenses/LGPL-2.1-or-later.txt
         Skills/bruecke/bruecke.py
+        Skills/zahnrad/zahnrad.py
+        Skills/welle/welle.py
+        Skills/lager/lager.py
+        Skills/gehaeuse/gehaeuse.py
+        Tools/getriebe_auslegung.py
     )
 
     INSTALL(
         DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/Resources
                   ${CMAKE_CURRENT_SOURCE_DIR}/Skills
+                  ${CMAKE_CURRENT_SOURCE_DIR}/Tools
         DESTINATION Mod/TextToGeometry
         FILES_MATCHING PATTERN "*.py" PATTERN "*.svg" PATTERN "*.txt"
     )

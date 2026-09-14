@@ -35,7 +35,7 @@ FILES = [
     "test_learn.py", "test_project.py", "test_agent.py",
     "test_tools.py",
 ]
-DIRS = ["Resources", "Skills"]
+DIRS = ["Resources", "Skills", "Tools"]
 
 #: Directories that belong to the user, not to the add-on -- never overwritten.
 KEEP_ON_UPDATE = ("Skills",)
