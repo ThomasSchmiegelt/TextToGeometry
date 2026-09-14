@@ -198,56 +198,78 @@ def baue(art="kette", zaehne_kurbel=20, modul=3.0, teilung=9.525,
 
 
 def _kettenbahn(r1, r2, a, glieder, teilung, rollen_d, breite):
-    """Die Kettenrollen entlang der Bahn: zwei Tangenten, zwei Bögen."""
-    # Umschlingungswinkel der beiden Raeder
-    try:
-        beta = math.asin((r2 - r1) / a)
-    except ValueError:
-        beta = 0.0
-    lang = math.pi + 2.0 * beta          # grosses Rad
-    kurz = math.pi - 2.0 * beta          # kleines Rad
-    tangente = math.sqrt(max(a * a - (r2 - r1) ** 2, 0.0))
+    """Die Kettenrollen entlang ihrer wirklichen Bahn.
+
+    Eine Kette laeuft auf den **Tangenten** an beide Raeder, nicht von
+    Radmitte zu Radmitte. Der erste Versuch tat genau das, und die Kette sah
+    entsprechend wild aus.
+
+    Die aeussere Tangente beruehrt beide Kreise mit derselben Normalen ``n``:
+    aus ``(C2-C1)·n = -(r2-r1)`` folgt ``n = (±sqrt(1-k²), -k)`` mit
+    ``k = (r2-r1)/a``. Die Beruehrpunkte sind ``r1·n`` und ``C2 + r2·n``.
+    Dazwischen liegen die Umschlingungsboegen, zusammen genau 360 Grad.
+    """
+    k = (r2 - r1) / a if a else 0.0
+    k = max(-0.999, min(0.999, k))
+    wurzel = math.sqrt(max(0.0, 1.0 - k * k))
+    n_plus = (wurzel, -k)
+    n_minus = (-wurzel, -k)
+
+    def winkel(n):
+        return math.atan2(n[1], n[0])
+
+    a_plus, a_minus = winkel(n_plus), winkel(n_minus)
+    # Bogen um das grosse Rad: von a_plus gegen den Uhrzeigersinn zu a_minus
+    # (ueber den Scheitel, von der Kurbel weg).
+    sweep2 = (a_minus - a_plus) % (2.0 * math.pi)
+    # Bogen um das kleine Rad: der Rest bis 360 Grad.
+    sweep1 = 2.0 * math.pi - sweep2
+
+    p1_plus = (r1 * n_plus[0], r1 * n_plus[1])
+    p2_plus = (r2 * n_plus[0], a + r2 * n_plus[1])
+    p1_minus = (r1 * n_minus[0], r1 * n_minus[1])
+    p2_minus = (r2 * n_minus[0], a + r2 * n_minus[1])
 
     bahn = []
-    # Bogen um das kleine Rad (Kurbel, im Ursprung)
-    n1 = max(2, int(round(kurz * r1 / teilung)))
-    for i in range(n1):
-        w = -kurz / 2.0 + kurz * i / float(n1) + math.pi
-        bahn.append(Vector(0.0, r1 * math.sin(w), r1 * math.cos(w)))
-    # Tangente hinauf
-    n2 = max(2, int(round(tangente / teilung)))
-    for i in range(n2):
-        t = i / float(n2)
-        bahn.append(Vector(0.0, -(r1 + (r2 - r1) * t), a * t))
-    # Bogen um das grosse Rad
-    n3 = max(2, int(round(lang * r2 / teilung)))
-    for i in range(n3):
-        w = math.pi + lang * i / float(n3)
-        bahn.append(Vector(0.0, r2 * math.sin(w), a + r2 * math.cos(w)))
-    # Tangente hinunter
-    for i in range(n2):
-        t = i / float(n2)
-        bahn.append(Vector(0.0, (r2 - (r2 - r1) * t), a * (1.0 - t)))
 
-    # An den Uebergaengen zwischen Bogen und Tangente fallen Punkte
-    # aufeinander — gemessen 95 % Durchdringung zweier Rollen. Der
-    # Mindestabstand ist der ROLLENDURCHMESSER, nicht die halbe Teilung:
-    # mit der halben Teilung (4,76 mm) blieben Rollen von 6,35 mm Dicke
-    # stellenweise ineinander stecken.
+    def gerade(von, nach):
+        laenge = math.hypot(nach[0] - von[0], nach[1] - von[1])
+        n_stueck = max(1, int(round(laenge / teilung)))
+        for i in range(n_stueck):
+            t = i / float(n_stueck)
+            bahn.append((von[0] + (nach[0] - von[0]) * t,
+                         von[1] + (nach[1] - von[1]) * t))
+
+    def bogen(mitte_z, radius, start, sweep):
+        n_stueck = max(1, int(round(abs(sweep) * radius / teilung)))
+        for i in range(n_stueck):
+            w = start + sweep * i / float(n_stueck)
+            bahn.append((radius * math.cos(w),
+                         mitte_z + radius * math.sin(w)))
+
+    gerade(p1_plus, p2_plus)
+    bogen(a, r2, a_plus, sweep2)
+    gerade(p2_minus, p1_minus)
+    bogen(0.0, r1, a_minus, sweep1)
+
+    # Zu dicht liegende Punkte fallen weg — der Mindestabstand ist der
+    # Rollendurchmesser, nicht die halbe Teilung.
     mindest = max(float(rollen_d) * 1.02, teilung * 0.5)
     gefiltert = []
-    for p in bahn:
-        if all(p.distanceToPoint(q) > mindest for q in gefiltert):
-            gefiltert.append(p)
-    if len(gefiltert) > 1 and \
-            gefiltert[0].distanceToPoint(gefiltert[-1]) < mindest:
+    for pt in bahn:
+        if all(math.hypot(pt[0] - q[0], pt[1] - q[1]) > mindest
+               for q in gefiltert):
+            gefiltert.append(pt)
+    if len(gefiltert) > 1 and math.hypot(
+            gefiltert[0][0] - gefiltert[-1][0],
+            gefiltert[0][1] - gefiltert[-1][1]) < mindest:
         gefiltert.pop()
 
     rollen = []
-    for i, p in enumerate(gefiltert):
+    for i, pt in enumerate(gefiltert):
         rollen.append(("Kettenrolle %d" % (i + 1),
                        Part.makeCylinder(float(rollen_d) / 2.0, breite * 0.6,
-                                         Vector(-breite * 0.3, p.y, p.z),
+                                         Vector(-breite * 0.3, pt[0], pt[1]),
                                          Vector(1, 0, 0))))
     return rollen
 

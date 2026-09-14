@@ -5845,6 +5845,10 @@ class T2GKurbeltriebCommand(_MakroCommand):
                    gruppe="Ventiltrieb",
                    hinweis="Nockenscheitel nach OT – hält Ventil und Kolben "
                            "auseinander"),
+            M.Feld("ventilwinkel", "Ventilwinkel", "Grad", 12.0, 0.0, 30.0,
+                   gruppe="Ventiltrieb",
+                   hinweis="Neigung gegen die Zylinderachse – das Dach des "
+                           "Brennraums; hält die Nockenwellen auseinander"),
             M.Feld("steuertrieb", "Steuertrieb", "", "kette",
                    auswahl=list(KS.ARTEN), gruppe="Ventiltrieb"),
             M.Feld("zaehne_kurbel", "Zähne am Kurbelrad", "Stk", 20, 9, 60,
@@ -5857,6 +5861,10 @@ class T2GKurbeltriebCommand(_MakroCommand):
                    gruppe="Wellen"),
             M.Feld("hauptlager_d", "Hauptlager", "mm", 54.0, 15.0, 140.0,
                    gruppe="Wellen"),
+            M.Feld("pleuel_breite", "Pleuelbreite", "mm", 22.0, 8.0, 80.0,
+                   gruppe="Wellen",
+                   hinweis="Bestimmt beim V-Motor den Bankversatz: zwei "
+                           "Pleuel nebeneinander auf einem Hubzapfen"),
 
             M.Feld("mit_ventiltrieb", "Ventiltrieb bauen", "", "ja",
                    auswahl=["ja", "nein"], gruppe="Umfang"),
@@ -5877,9 +5885,11 @@ class T2GKurbeltriebCommand(_MakroCommand):
         k = KM.kennwerte(**w)
         FreeCAD.Console.PrintMessage(
             "Kurbeltrieb %s: %d Zylinder, %.0f cm^3, Blockhöhe %.1f mm, "
-            "Zündfolge %s\n"
+            "Zündfolge %s%s\n"
             % (k["bauform"], k["zylinder"], k["hubraum_cm3"],
-               k["blockhoehe"], "-".join(str(x) for x in k["zuendfolge"])))
+               k["blockhoehe"], "-".join(str(x) for x in k["zuendfolge"]),
+               (", Bankversatz %.1f mm" % k["bankversatz"])
+               if k.get("bankversatz") else ""))
         teile, kenn, proben = KM.baue(doc=doc, **w)
         objekte = []
         for label, shp in teile:

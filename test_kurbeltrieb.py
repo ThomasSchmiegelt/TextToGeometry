@@ -151,8 +151,80 @@ gruppen = {f.gruppe for f in felder}
 pruefe(len(gruppen) >= 3, "Felder in %d Gruppen: %s"
        % (len(gruppen), ", ".join(sorted(gruppen))))
 namen = {f.name for f in felder}
-pruefe({"bauform", "bohrung", "hub", "mit_getriebe"} <= namen,
-       "die wichtigen Felder sind da")
+pruefe({"bauform", "bohrung", "hub", "mit_getriebe", "ventilwinkel",
+        "pleuel_breite"} <= namen, "die wichtigen Felder sind da")
+
+# --- 7: Was der Benutzer gemeldet hat ------------------------------------
+log("\n--- Die gemeldeten Punkte ---")
+doc = FreeCAD.newDocument("KT_Befunde")
+teile, kenn, _p = kt_motor.baue(bauform="V8", doc=doc)
+
+
+def mitte(shape, achse):
+    b = shape.BoundBox
+    return (getattr(b, achse + "Min") + getattr(b, achse + "Max")) / 2.0
+
+
+# Zylinder je Bank in einer Reihe: alle Kolben einer Bank auf der Bankachse.
+for bank, rest in ((0, 1), (1, 0)):
+    kolben = [s for n, s in teile if n.startswith("Kolben ")
+              and int(n.split()[1]) % 2 == rest]
+    achsen = [(abs(mitte(s, "Y")) - abs(mitte(s, "Z"))) for s in kolben]
+    pruefe(max(abs(a) for a in achsen) < 1.0,
+           "Bank %d: alle %d Kolben auf der Bankachse (45 Grad, |y| = |z|)"
+           % (bank + 1, len(kolben)))
+
+# Bankversatz
+pruefe(abs(kenn["bankversatz"] - 22.0) < 0.01,
+       "Bankversatz %.1f mm" % kenn["bankversatz"])
+
+# Nockenwellen duerfen sich nicht durchdringen.
+nw = [(n, s) for n, s in teile if n.startswith("Nockenwelle")]
+pruefe(len(nw) == 4, "vier Nockenwellen beim V8 (%d)" % len(nw))
+schlimm = 0.0
+for i in range(len(nw)):
+    for j in range(i + 1, len(nw)):
+        schlimm = max(schlimm, nw[i][1].common(nw[j][1]).Volume)
+pruefe(schlimm < 1.0,
+       "die Nockenwellen stehen nicht ineinander (%.1f mm^3)" % schlimm)
+
+# Je Bank ein Steuertrieb.
+kurbelraeder = [s for n, s in teile if "Kettenrad Kurbel" in n]
+pruefe(len(kurbelraeder) == 2, "je Bank ein Steuertrieb (%d Kurbelraeder)"
+       % len(kurbelraeder))
+if len(kurbelraeder) == 2:
+    pruefe(kurbelraeder[0].common(kurbelraeder[1]).Volume < 1.0,
+           "die beiden Kurbelraeder sitzen nebeneinander")
+
+# Ventilwinkel: Ein- und Auslass zeigen in verschiedene Richtungen.
+ein = [s for n, s in teile if n.startswith("Einlassventil 1.")]
+aus = [s for n, s in teile if n.startswith("Auslassventil 1.")]
+if ein and aus:
+    neigung_ein = mitte(ein[0], "Y") / max(abs(mitte(ein[0], "Z")), 1e-9)
+    neigung_aus = mitte(aus[0], "Y") / max(abs(mitte(aus[0], "Z")), 1e-9)
+    pruefe(abs(neigung_ein - neigung_aus) > 0.1,
+           "Ein- und Auslassventil stehen im Winkel zueinander")
+
+# Ventiltaschen: flach, nicht 13 mm tief.
+kolben1 = [s for n, s in teile if n == "Kolben 1"][0]
+voll = kt_kolben.baue(bohrung=kenn["bohrung"],
+                      kompressionshoehe=kenn["kompressionshoehe"])
+fehlt = voll.koerper[0][1].Volume - kolben1.Volume
+pruefe(0.0 < fehlt < 30000.0,
+       "die Ventiltaschen nehmen %.0f mm^3 weg (nicht den halben Kolben)"
+       % fehlt)
+
+# Kette: gleichmaessige Rollenabstaende.
+rollen = [s for n, s in teile if "Kettenrolle" in n and n.startswith("Bank 1")]
+if len(rollen) > 4:
+    import math as _m
+    orte = [(mitte(s, "Y"), mitte(s, "Z")) for s in rollen]
+    abst = [_m.hypot(orte[i][0] - orte[i + 1][0], orte[i][1] - orte[i + 1][1])
+            for i in range(len(orte) - 1)]
+    pruefe(max(abst) < 2.0 * min(abst),
+           "die Kettenrollen liegen gleichmaessig (%.2f bis %.2f mm)"
+           % (min(abst), max(abst)))
+FreeCAD.closeDocument(doc.Name)
 
 log("\nFEHLER: %d" % len(FEHLER))
 log("ALLE GRUEN" if not FEHLER else "FEHLGESCHLAGEN")
