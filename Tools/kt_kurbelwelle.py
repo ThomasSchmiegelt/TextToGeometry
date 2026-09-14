@@ -15,7 +15,7 @@ Bank B. Das ist der Grund, warum ein 90°-V6 überhaupt gleichmäßig zünden
 kann.
 
 Anschlusspunkte
-    ``hubzapfen_1..n``    Mitte jedes Hubzapfens, Achse +Y, Art *welle*
+    ``hubzapfen_1..n``    Mitte jedes Hubzapfens, Achse **+X**, Art *welle*
     ``hubzapfen_1b..nb``  nur bei Versatz: die zweite Hälfte für Bank B
     ``hauptlager_1..m``   Mitte jedes Hauptlagers, Achse +X, Art *welle*
     ``abtrieb``           Schwungradflansch, Achse +X, Art *flaeche*
@@ -152,13 +152,13 @@ def baue(bauform="R4", hub=86.0, zylinderabstand=91.0, hauptlager_d=54.0,
                                                 Vector(1, 0, 0))))
                 punkte.append(Punkt(
                     "hubzapfen_%d%s" % (k + 1, kuerzel),
-                    (px + halbe / 2.0, yy, zz), (0, 1, 0), "welle",
+                    (px + halbe / 2.0, yy, zz), (1, 0, 0), "welle",
                     float(hubzapfen_d),
                     "Hubzapfen %d, Bank %s, %.1f Grad"
                     % (k + 1, "A" if kuerzel == "a" else "B", pw % 360.0)))
             punkte.append(Punkt("hubzapfen_%d" % (k + 1),
                                 (zapfen_x + float(hubzapfen_b) / 2.0, y, z),
-                                (0, 1, 0), "welle", float(hubzapfen_d),
+                                (1, 0, 0), "welle", float(hubzapfen_d),
                                 "Hubzapfen %d (Mitte)" % (k + 1)))
         else:
             teile.append(("Hubzapfen %d" % (k + 1),
@@ -167,7 +167,7 @@ def baue(bauform="R4", hub=86.0, zylinderabstand=91.0, hauptlager_d=54.0,
                                             Vector(1, 0, 0))))
             punkte.append(Punkt(
                 "hubzapfen_%d" % (k + 1),
-                (zapfen_x + float(hubzapfen_b) / 2.0, y, z), (0, 1, 0),
+                (zapfen_x + float(hubzapfen_b) / 2.0, y, z), (1, 0, 0),
                 "welle", float(hubzapfen_d),
                 "Hubzapfen %d, %.1f Grad" % (k + 1, phi)))
         x += float(hubzapfen_b)
@@ -235,6 +235,15 @@ def selbsttest():
                     "%s Zapfen %d: (%.2f, %.2f) statt (%.2f, %.2f) bei %.1f "
                     "Grad" % (bauform, k + 1, p.ort.y, p.ort.z, y, z,
                               winkel[k]))
+            # Die Zapfenachse ist die WELLENACHSE. Mit (0,1,0) deklariert
+            # dockt das Pleuel quer an und liegt in der Kurbelwellenebene —
+            # die Paarungspruefung merkt das nicht, weil beide Seiten dann
+            # konsistent falsch sind. Gemessen hatte das Pleuel 62 mm
+            # Ausdehnung laengs der Welle statt 22.
+            if abs(p.achse.x - 1.0) > 1e-9:
+                raise AssertionError(
+                    "%s Zapfen %d: Achse %s statt der Wellenachse (1,0,0)"
+                    % (bauform, k + 1, p.achse))
             # Der Kurbelradius muss stimmen.
             radius = math.hypot(p.ort.y, p.ort.z)
             if abs(radius - r) > 1e-6:

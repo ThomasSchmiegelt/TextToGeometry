@@ -44,7 +44,7 @@ def kennwerte(stichmass=150.0, hub=86.0, **_rest):
 
 def baue(stichmass=150.0, hubzapfen_d=48.0, bolzen_d=22.0, breite=22.0,
          schaft_b=16.0, schaft_t=12.0, auge_wand=7.0, klein_wand=5.0,
-         name="Pleuel"):
+         spiel=0.06, name="Pleuel"):
     """Ein Pleuel als :class:`Bauteil`.
 
     stichmass     Abstand der Augenmitten [mm]
@@ -54,6 +54,10 @@ def baue(stichmass=150.0, hubzapfen_d=48.0, bolzen_d=22.0, breite=22.0,
     schaft_b      Breite des Schafts [mm]   schaft_t  Dicke des Schafts [mm]
     auge_wand     Wandstärke am großen Auge [mm]
     klein_wand    Wandstärke am kleinen Auge [mm]
+    spiel         Lagerspiel je Auge [mm]. Ohne Spiel sind Auge und Zapfen
+                  exakt gleich groß, und das ist geometrisch nicht von einer
+                  Durchdringung zu unterscheiden: der Zusammenbau meldete
+                  38,5 % zwischen Kurbelwelle und Pleuel.
     """
     l = float(stichmass)
     r_gross = float(hubzapfen_d) / 2.0 + float(auge_wand)
@@ -84,10 +88,11 @@ def baue(stichmass=150.0, hubzapfen_d=48.0, bolzen_d=22.0, breite=22.0,
                                -float(schaft_b) * 0.275, 2.0))
     schaft = schaft.cut(steg.cut(kern))
 
+    sp = max(0.0, float(spiel))
     koerper = gross.fuse(klein).fuse(schaft)
-    koerper = koerper.cut(scheibe(float(hubzapfen_d) / 2.0,
+    koerper = koerper.cut(scheibe(float(hubzapfen_d) / 2.0 + sp,
                                   float(breite) + 4.0, 0.0))
-    koerper = koerper.cut(scheibe(float(bolzen_d) / 2.0,
+    koerper = koerper.cut(scheibe(float(bolzen_d) / 2.0 + sp,
                                   float(breite) + 4.0, l))
 
     return Bauteil(
@@ -117,12 +122,15 @@ def selbsttest():
     if abs(ab - l) > 1e-9:
         raise AssertionError("Stichmass %.3f statt %.1f mm" % (ab, l))
 
-    # Beide Bohrungen muessen frei sein.
+    # Beide Bohrungen muessen den Zapfen spielend aufnehmen — mit seinem
+    # vollen Nenndurchmesser, nicht mit einem abgezogenen Probenmass.
     for z, d, wie in ((0.0, 48.0, "grosses Auge"), (l, 22.0, "kleines Auge")):
-        stift = Part.makeCylinder(d / 2.0 - 0.2, 300.0,
-                                  Vector(0, -150.0, z), Vector(0, 1, 0))
-        if shp.common(stift).Volume > 1.0:
-            raise AssertionError("%s ist nicht frei" % wie)
+        zapfen = Part.makeCylinder(d / 2.0, 300.0, Vector(0, -150.0, z),
+                                   Vector(0, 1, 0))
+        durch = shp.common(zapfen).Volume
+        if durch > 1.0:
+            raise AssertionError("%s klemmt auf dem Zapfen (%.1f mm^3)"
+                                 % (wie, durch))
 
     # Die Augen muessen Material haben, sonst ist es kein Auge.
     ring = Part.makeCylinder(48.0 / 2.0 + 5.0, 10.0, Vector(0, -5.0, 0),

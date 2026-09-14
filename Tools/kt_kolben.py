@@ -41,7 +41,7 @@ def kennwerte(bohrung=86.0, kompressionshoehe=32.0, bolzen_d=22.0,
 def baue(bohrung=86.0, kompressionshoehe=32.0, bolzen_d=22.0,
          schafthoehe=48.0, boden_t=7.0, ringe=3, ringnut_h=1.5,
          ringnut_t=2.0, laufspiel=0.12, pleuel_b=17.0, pleuel_spiel=0.5,
-         name="Kolben"):
+         ventiltaschen=None, name="Kolben"):
     """Ein Kolben als :class:`Bauteil`.
 
     bohrung            Zylinderbohrung [mm]; der Kolben ist um das Laufspiel
@@ -53,6 +53,11 @@ def baue(bohrung=86.0, kompressionshoehe=32.0, bolzen_d=22.0,
     ringe              Zahl der Kolbenringe
     pleuel_b           Breite des kleinen Pleuelauges [mm] — dafür bleibt
                        zwischen den Bolzennaben ein Schlitz frei
+    ventiltaschen      Liste von (x, y, d, tiefe) im Kolbenkoordinatensystem:
+                       Mulden im Boden, damit die Ventile bei der
+                       Überschneidung am oberen Totpunkt nicht anschlagen.
+                       Ohne sie durchdringen sich Kolben und Ventil — real
+                       ist genau das der Grund, warum es Ventiltaschen gibt.
     """
     d = float(bohrung) - float(laufspiel)
     r = d / 2.0
@@ -97,6 +102,15 @@ def baue(bohrung=86.0, kompressionshoehe=32.0, bolzen_d=22.0,
         nabe = nabe.cut(schlitz)
         koerper = koerper.fuse(nabe.common(
             Part.makeCylinder(r, kh + sh, Vector(0, 0, -sh))))
+
+    # Ventiltaschen im Boden.
+    for tasche in (ventiltaschen or []):
+        tx, ty, td, tt = (float(v) for v in tasche)
+        if td <= 0.0 or tt <= 0.0:
+            continue
+        mulde = Part.makeCylinder(td / 2.0, tt + 1.0,
+                                  Vector(tx, ty, kh - tt))
+        koerper = koerper.cut(mulde)
 
     # Bolzenbohrung quer durch.
     koerper = koerper.cut(Part.makeCylinder(bd / 2.0, d + 4.0,

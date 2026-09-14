@@ -157,11 +157,24 @@ def baue(art="kette", zaehne_kurbel=20, modul=3.0, teilung=9.525,
     else:
         d1, da1 = kettenradmasse(z1, teilung)
         d2, da2 = kettenradmasse(z2, teilung)
-        for da, z, label in ((da1, 0.0, "Kettenrad Kurbel (z=%d)" % z1),
-                             (da2, a, "Kettenrad Nocken (z=%d)" % z2)):
-            rad = Part.makeCylinder(da / 2.0, float(breite),
+        # Das Rad wird auf FUSSKREIS gezeichnet, nicht auf Kopfkreis: die
+        # Rollen liegen auf dem Teilkreis, und ein Rad mit Kopfkreis
+        # verschluckt sie ganz (gemessen: 100 % Durchdringung). Auf
+        # Fusskreis (d - Rollendurchmesser) liegen sie ihm tangential auf.
+        for d, z, bohrung, label in (
+                (d1, 0.0, float(kurbel_d), "Kettenrad Kurbel (z=%d)" % z1),
+                (d2, a, float(nocken_d), "Kettenrad Nocken (z=%d)" % z2)):
+            rad = Part.makeCylinder((d - float(rollen_d)) / 2.0,
+                                    float(breite),
                                     Vector(-float(breite) / 2.0, 0, z),
                                     Vector(1, 0, 0))
+            # Ohne Bohrung steckt das Rad auf der Welle statt auf ihr zu
+            # sitzen — gemessen 30,3 % Durchdringung mit der Kurbelwelle.
+            if bohrung > 0.0:
+                rad = rad.cut(Part.makeCylinder(
+                    bohrung / 2.0 + 0.05, float(breite) + 4.0,
+                    Vector(-float(breite) / 2.0 - 2.0, 0, z),
+                    Vector(1, 0, 0)))
             teile.append((label, rad))
         glieder, roh = kettenlaenge(z1, z2, a, teilung)
         k["glieder"] = glieder
@@ -216,8 +229,19 @@ def _kettenbahn(r1, r2, a, glieder, teilung, rollen_d, breite):
         t = i / float(n2)
         bahn.append(Vector(0.0, (r2 - (r2 - r1) * t), a * (1.0 - t)))
 
+    # An den Uebergaengen zwischen Bogen und Tangente fallen Punkte
+    # aufeinander — gemessen 95 % Durchdringung zweier Rollen. Wer naeher
+    # liegt als eine halbe Teilung, faellt weg.
+    gefiltert = []
+    for p in bahn:
+        if all(p.distanceToPoint(q) > teilung * 0.5 for q in gefiltert):
+            gefiltert.append(p)
+    if len(gefiltert) > 1 and \
+            gefiltert[0].distanceToPoint(gefiltert[-1]) < teilung * 0.5:
+        gefiltert.pop()
+
     rollen = []
-    for i, p in enumerate(bahn):
+    for i, p in enumerate(gefiltert):
         rollen.append(("Kettenrolle %d" % (i + 1),
                        Part.makeCylinder(float(rollen_d) / 2.0, breite * 0.6,
                                          Vector(-breite * 0.3, p.y, p.z),
@@ -272,10 +296,30 @@ def selbsttest():
     if len(raeder) != 2:
         raise AssertionError("es fehlen Kettenraeder")
     d_klein = max(raeder[0].BoundBox.YLength, raeder[0].BoundBox.ZLength)
-    _d, da1 = kettenradmasse(20, 9.525)
-    if abs(d_klein - da1) > 0.2:
-        raise AssertionError("Kettenrad %.2f statt Kopfkreis %.2f"
-                             % (d_klein, da1))
+    d1, _da1 = kettenradmasse(20, 9.525)
+    fuss = d1 - 6.35
+    if abs(d_klein - fuss) > 0.2:
+        raise AssertionError("Kettenrad %.2f statt Fusskreis %.2f"
+                             % (d_klein, fuss))
+    # Die Welle muss durch die Radbohrung passen.
+    welle = Part.makeCylinder(30.0 / 2.0, 200.0, Vector(-100.0, 0, 0),
+                              Vector(1, 0, 0))
+    if raeder[0].common(welle).Volume > 1.0:
+        raise AssertionError("das Kettenrad hat keine Bohrung fuer die Welle")
+
+    # Die Rollen duerfen weder im Rad noch ineinander stecken.
+    rollen = [s for n, s in t.koerper if n.startswith("Kettenrolle")]
+    schlimm = max(raeder[0].common(r).Volume for r in rollen)
+    if schlimm > 1.0:
+        raise AssertionError("eine Kettenrolle steckt im Rad (%.1f mm^3)"
+                             % schlimm)
+    for i in range(len(rollen)):
+        for j in range(i + 1, len(rollen)):
+            if not rollen[i].BoundBox.intersect(rollen[j].BoundBox):
+                continue
+            if rollen[i].common(rollen[j]).Volume > 1.0:
+                raise AssertionError("Kettenrolle %d und %d stecken "
+                                     "ineinander" % (i + 1, j + 1))
     # Die beiden Anschlusspunkte muessen den Achsabstand haben.
     ab = t.punkt("kurbel").ort.distanceToPoint(t.punkt("nocken").ort)
     if abs(ab - t.kennwerte["achsabstand"]) > 1e-6:

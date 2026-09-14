@@ -73,7 +73,7 @@ def kennwerte(nocken=4, grundkreis_d=32.0, hub=10.0, **_rest):
 
 
 def baue(winkel=None, grundkreis_d=32.0, hub=10.0, nocken_b=12.0,
-         abstand=45.0, lager_d=28.0, lager_b=18.0, welle_d=24.0,
+         abstand=45.0, orte=None, lager_d=28.0, lager_b=18.0, welle_d=24.0,
          antrieb_d=26.0, antrieb_l=28.0, flanke=60.0, name="Nockenwelle"):
     """Eine Nockenwelle als :class:`Bauteil`.
 
@@ -81,11 +81,22 @@ def baue(winkel=None, grundkreis_d=32.0, hub=10.0, nocken_b=12.0,
     grundkreis_d  Grundkreisdurchmesser [mm]
     hub           Nockenerhebung = Ventilhub [mm]
     nocken_b      Breite eines Nockens [mm]
-    abstand       Abstand der Nocken [mm]
+    abstand       gleichmäßiger Abstand der Nocken [mm]
+    orte          x-Lage jedes Nockens [mm]; überschreibt ``abstand``. Ein
+                  Vierventiler hat zwei Nocken je Zylinder, und die sitzen
+                  nicht im Zylinderabstand — mit gleichmäßiger Teilung wurde
+                  eine 822 mm lange Welle daraus statt 224 mm.
     lager_d       Lagerzapfendurchmesser [mm]; ein Lager je zwei Nocken
     """
     winkel = list(winkel or [0.0, 180.0, 180.0, 0.0])
     n = len(winkel)
+    if orte is not None:
+        orte = [float(x) for x in orte]
+        if len(orte) != n:
+            raise ValueError("Zu jedem Nocken gehoert ein Ort: %d Winkel, "
+                             "%d Orte." % (n, len(orte)))
+    else:
+        orte = [k * float(abstand) for k in range(n)]
     rg = float(grundkreis_d) / 2.0
     h = float(hub)
     if h <= 0.0:
@@ -98,15 +109,15 @@ def baue(winkel=None, grundkreis_d=32.0, hub=10.0, nocken_b=12.0,
 
     teile = []
     punkte = []
-    laenge = (n - 1) * float(abstand) + float(nocken_b) + 2.0 * float(lager_b)
-    x0 = -float(lager_b)
+    laenge = (max(orte) - min(orte)) + float(nocken_b) + 2.0 * float(lager_b)
+    x0 = min(orte) - float(lager_b)
 
     # Durchgehender Schaft
     teile.append(("Schaft", Part.makeCylinder(
         float(welle_d) / 2.0, laenge, Vector(x0, 0, 0), Vector(1, 0, 0))))
 
     for k, w in enumerate(winkel):
-        x = k * float(abstand)
+        x = orte[k]
         teile.append(("Nocken %d" % (k + 1),
                       nockenkontur(rg, h, float(nocken_b), w, flanke)
                       .translated(Vector(x, 0, 0))
@@ -125,8 +136,8 @@ def baue(winkel=None, grundkreis_d=32.0, hub=10.0, nocken_b=12.0,
 
         # Lagerzapfen jeweils vor dem ersten und nach jedem zweiten Nocken.
         if k % 2 == 0:
-            lx = x - float(lager_b) if k == 0 else x - float(abstand) / 2.0 \
-                - float(lager_b) / 2.0
+            lx = x - float(lager_b) if k == 0 else \
+                (orte[k - 1] + x) / 2.0 - float(lager_b) / 2.0
             teile.append(("Lager %d" % (k // 2 + 1), Part.makeCylinder(
                 float(lager_d) / 2.0, float(lager_b), Vector(lx, 0, 0),
                 Vector(1, 0, 0))))
@@ -136,7 +147,7 @@ def baue(winkel=None, grundkreis_d=32.0, hub=10.0, nocken_b=12.0,
                                 "Lagerzapfen %d" % (k // 2 + 1)))
 
     # Lager am Ende
-    lx = (n - 1) * float(abstand) + float(nocken_b)
+    lx = max(orte) + float(nocken_b)
     teile.append(("Lager Ende", Part.makeCylinder(
         float(lager_d) / 2.0, float(lager_b), Vector(lx, 0, 0),
         Vector(1, 0, 0))))
