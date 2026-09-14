@@ -206,6 +206,11 @@ the registry holds `zahnrad`. `_resolve_skill_name()` goes via
 `SkillNeed.source`, then the name stem, and its error lists the skills that do
 exist — "unknown skill" alone cost twelve steps in one run.
 
+Building the same part again **replaces** it: `_add_skill_shapes()` removes
+every object whose label starts with `T2G <name> [` first. The agent routinely
+rebuilds a part after seeing where it landed, and appending left 26 bodies for
+17 parts — with the misplaced ones still in the document.
+
 `_describe_build()` reports the resulting bounding box *in document
 coordinates*. Without the position the agent cannot tell ten stacked parts from
 ten placed ones, and happily reported success on a pile at the origin.

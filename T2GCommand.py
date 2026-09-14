@@ -919,6 +919,16 @@ class T2GPanel(QWidget):
         doc = FreeCAD.ActiveDocument
         if doc is None:
             doc = FreeCAD.newDocument("T2G")
+        # Building the same part again replaces it. The agent regularly
+        # rebuilds a part after seeing where it landed; appending instead left
+        # 26 bodies for 17 parts, with the wrong ones still in the document.
+        vorher = "T2G %s [" % name
+        for alt in [o for o in doc.Objects
+                    if (getattr(o, "Label", "") or "").startswith(vorher)]:
+            try:
+                doc.removeObject(alt.Name)
+            except Exception:  # noqa: BLE001 - a leftover is better than a crash
+                pass
         base = len(doc.Objects)
         added = 0
         for j, shp in enumerate(shapes):
