@@ -2021,7 +2021,9 @@ class T2GPanel(QWidget):
         before = self._project.path if self._project else None
         p = self._open_or_create_project(title)
         msg = ("Projekt geöffnet: " if p.path == before else "Projekt angelegt: ")
-        return msg + p.path
+        # Der Hinweis hing zuerst an `baugruppe:` - das ruft der Agent aber
+        # nicht immer auf. `projekt_anlegen` steht am Anfang jedes Laufs.
+        return msg + p.path + self._werkzeug_hinweis(title, [])
 
     def _act_auftrag(self, action) -> str:
         p = self._prj_require()
@@ -2212,10 +2214,11 @@ class T2GPanel(QWidget):
                 return ("\n\nHINWEIS: Für genau diese Baugruppe gibt es ein "
                         "Werkzeug. Ein Aufruf baut alle Teile fertig "
                         "platziert, mit gerechnetem Achsabstand, Zähnezahlen "
-                        "und Gehäusemaßen – statt %d Einzelteilen:\n"
+                        "und Gehäusemaßen%s:\n"
                         "  skill_bauen: %s;<arg=wert>\n"
                         "  %s%s"
-                        % (len(teile), modul, modul, t.signature or ""))
+                        % (" – statt %d Einzelteilen" % len(teile)
+                           if teile else "", modul, modul, t.signature or ""))
         return ""
 
     def _external(self, name: str):

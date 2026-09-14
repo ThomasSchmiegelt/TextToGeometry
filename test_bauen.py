@@ -65,6 +65,19 @@ class Panel(object):
         return T2GSkills.SkillEngine(
             T2GSkills.SkillEngine._default_skills_dir()).load_all()
 
+    #: Attrappe fuer das einzige Eingabefeld, das der Bau-Pfad liest.
+    class _Feld(object):
+        def __init__(self, wert):
+            self._wert = wert
+
+        def text(self):
+            return self._wert
+
+        def setText(self, wert):
+            self._wert = wert
+
+    prj_base = _Feld(os.environ.get("T2G_TEST_PRJ", "/tmp"))
+
     # Alles, was ein Widget anfasst, ist hier eine Attrappe.
     def _prj_show_skill_status(self, *a, **k):
         pass
@@ -79,7 +92,7 @@ class Panel(object):
 for _name, _wert in _P.__dict__.items():
     if _name.startswith("__") or _name in (
             "_skills_engine", "_project", "_prj_show_skill_status",
-            "_prj_show", "_chat_append"):
+            "_prj_show", "_chat_append", "prj_base", "_Feld"):
         continue
     setattr(Panel, _name, _wert)
 
@@ -288,7 +301,14 @@ pruefe("HINWEIS" in r and "skill_bauen: getriebe" in r,
 r = p._act_baugruppe(Aktion("Tischlampe", "fuss", "schirm"))
 pruefe("HINWEIS" not in r,
        "eine unbeteiligte Baugruppe bekommt keinen Hinweis")
+# Der Agent ruft `baugruppe:` nicht immer auf; `projekt_anlegen` haengt
+# denselben Hinweis an, hier direkt geprueft.
 p._project = None
+r = p._werkzeug_hinweis("Getriebe 5 Gang", [])
+pruefe("HINWEIS" in r and "skill_bauen: getriebe" in r,
+       "der Hinweis greift auch ohne Teileliste (projekt_anlegen)")
+pruefe(p._werkzeug_hinweis("Tischlampe", []) == "",
+       "und bleibt aus, wo er nicht hingehoert")
 
 log("\nFEHLER: %d" % len(FEHLER))
 log("ALLE GRUEN" if not FEHLER else "FEHLGESCHLAGEN")
