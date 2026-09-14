@@ -40,6 +40,7 @@ __all__ = [
     "LoadedSkill",
     "SkillRegistry",
     "SkillEngine",
+    "describe_skills",
     "validate_params",
     "apply_rules",
     "check_kollision",
@@ -121,6 +122,7 @@ class SkillDefinition:
     params: list = field(default_factory=list)
     dependencies: list = field(default_factory=list)
     pruefregeln: list = field(default_factory=list)
+    achse: str = "z"        # axis the part is built along: x | y | z
     path: str = ""          # absolute path of the skill .py file
     file: str = ""          # file name (e.g. "bruecke.py")
 
@@ -228,11 +230,38 @@ def load_skill_file(path: str) -> LoadedSkill:
         params=params,
         dependencies=list(meta.get("dependencies") or []),
         pruefregeln=list(meta.get("pruefregeln") or []),
+        achse=str(meta.get("achse") or "z").strip().lower()[:1] or "z",
         path=os.path.abspath(path),
         file=os.path.basename(path),
     )
     return LoadedSkill(definition=definition, build=build,
                        namespace=ns, source=source)
+
+
+def describe_skills(skills, limit_params: int = 8) -> str:
+    """What a skill builds, along which axis, and with which parameters.
+
+    The agent used to get bare names. It then had no way to know that
+    ``gehaeuse`` places its shaft bores along X while it had laid the gearbox
+    out along Z -- no amount of translating can fix that, and four builds in a
+    row landed beside the assembly.
+    """
+    zeilen = []
+    for sk in skills:
+        d = sk.definition if hasattr(sk, "definition") else sk
+        kopf = "- %s (Achse %s)" % (d.name, d.achse.upper())
+        if d.description:
+            kopf += ": " + d.description.strip().splitlines()[0]
+        zeilen.append(kopf)
+        teile = []
+        for q in d.params[:limit_params]:
+            einheit = ("" if q.unit in ("", "-") else " " + q.unit)
+            teile.append("%s=%s%s" % (q.name, q.default, einheit))
+        if len(d.params) > limit_params:
+            teile.append("… %d weitere" % (len(d.params) - limit_params))
+        if teile:
+            zeilen.append("    " + ", ".join(teile))
+    return "\n".join(zeilen)
 
 
 # ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ T2G_SKILL = {
     ],
     "dependencies": ["Part", "FreeCAD"],
     "pruefregeln": ["konnektivitaet"],
+    "achse": "z",
 }
 
 

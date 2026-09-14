@@ -48,6 +48,7 @@ class ExternalTool:
     module: str = ""          # importable module, for kind="python"
     entry: str = ""           # function inside that module
     command: str = ""         # FreeCAD command id, for kind="befehl"
+    signature: str = ""       # "(modul, z1, z2)", for kind="python"
     source: str = ""          # where it was found
 
     def label(self) -> str:
@@ -57,7 +58,8 @@ class ExternalTool:
 
     def as_line(self) -> str:
         rest = self.description.strip().splitlines()
-        return f"{self.label()}: {rest[0] if rest else ''}".rstrip(": ")
+        kopf = self.label() + (self.signature or "")
+        return f"{kopf}: {rest[0] if rest else ''}".rstrip(": ")
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -203,13 +205,49 @@ def discover_addons(mod_dirs=None, skip=("TextToGeometry",)) -> list:
 
 def module_functions(path: str) -> list:
     """Top-level function names of a Python file, without importing it."""
+    return [sig["name"] for sig in module_signatures(path)]
+
+
+def module_signatures(path: str) -> list:
+    """Name, argument list and own docstring of each public function.
+
+    The prompt used to show the *module* docstring for every function, so a
+    file with twelve helpers produced twelve identical lines and the agent
+    could not tell `achsabstand` from `selbsttest`. Reading the signature
+    costs nothing here -- it is the same AST walk.
+    """
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             tree = ast.parse(fh.read())
     except (OSError, SyntaxError):
         return []
-    return [n.name for n in tree.body
-            if isinstance(n, ast.FunctionDef) and not n.name.startswith("_")]
+    out = []
+    for n in tree.body:
+        if not isinstance(n, ast.FunctionDef) or n.name.startswith("_"):
+            continue
+        args = []
+        stellen = list(n.args.posonlyargs) + list(n.args.args)
+        vorgaben = list(n.args.defaults)
+        ohne = len(stellen) - len(vorgaben)
+        for i, a in enumerate(stellen):
+            if i < ohne:
+                args.append(a.arg)
+            else:
+                try:
+                    args.append("%s=%s" % (a.arg,
+                                           ast.unparse(vorgaben[i - ohne])))
+                except Exception:  # noqa: BLE001 - a name is better than none
+                    args.append(a.arg + "=…")
+        if n.args.vararg:
+            args.append("*" + n.args.vararg.arg)
+        for a in n.args.kwonlyargs:
+            args.append(a.arg + "=…")
+        if n.args.kwarg:
+            args.append("**" + n.args.kwarg.arg)
+        doc = (ast.get_docstring(n) or "").strip().splitlines()
+        out.append({"name": n.name, "args": args,
+                    "doc": doc[0].strip() if doc else ""})
+    return out
 
 
 def discover_python_tools(paths) -> list:
@@ -222,12 +260,13 @@ def discover_python_tools(paths) -> list:
     for raw in (paths or []):
         path = os.path.abspath(os.path.expanduser(str(raw)))
         if os.path.isfile(path) and path.endswith(".py"):
-            for fn in module_functions(path):
+            modul = os.path.splitext(os.path.basename(path))[0]
+            for sig in module_signatures(path):
                 out.append(ExternalTool(
-                    kind="python", name="%s.%s" % (
-                        os.path.splitext(os.path.basename(path))[0], fn),
-                    description=_first_doc(path), path=path, entry=fn,
-                    module=os.path.splitext(os.path.basename(path))[0],
+                    kind="python", name="%s.%s" % (modul, sig["name"]),
+                    description=sig["doc"] or _first_doc(path), path=path,
+                    entry=sig["name"], module=modul,
+                    signature="(%s)" % ", ".join(sig["args"]),
                     source=os.path.dirname(path)))
         elif os.path.isdir(path):
             init = os.path.join(path, "__init__.py")
@@ -245,14 +284,19 @@ def discover_python_tools(paths) -> list:
                                              if isinstance(el, ast.Constant)]
                 except (OSError, SyntaxError, AttributeError):
                     names = []
-                names = names or module_functions(init)
+                sigs = {g["name"]: g for g in module_signatures(init)}
+                names = names or list(sigs)
                 for fn in names:
                     if fn[:1].isupper():       # classes: not callable as tools
                         continue
+                    sig = sigs.get(fn) or {}
                     out.append(ExternalTool(
                         kind="python", name="%s.%s" % (pkg, fn),
-                        description=_first_doc(init), path=path, entry=fn,
-                        module=pkg, source=os.path.dirname(path)))
+                        description=sig.get("doc") or _first_doc(init),
+                        path=path, entry=fn, module=pkg,
+                        signature=("(%s)" % ", ".join(sig["args"]))
+                                  if sig.get("args") is not None else "",
+                        source=os.path.dirname(path)))
             else:
                 for entry in sorted(os.listdir(path)):
                     if entry.endswith(".py") and not entry.startswith("_"):

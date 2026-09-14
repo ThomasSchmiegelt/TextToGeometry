@@ -2754,6 +2754,14 @@ ARBEITSWEISE
 - `skill_lernen`, `werkzeug_erzeugen`, `skill_verfeinern` dauern Minuten.
   Höchstens einen davon pro Schritt. Fehlt ein Skill, dann lerne ihn - Fragen
   und Nebenarbeiten ersetzen das nicht.
+- ABGELEITETE MASSE RECHNEN, NICHT RATEN. Steht unter WERKZEUGE eine
+  Funktion, die eine Groesse liefert (Achsabstand, Kopfkreis, Gehaeusemass),
+  dann `werkzeug_aufrufen` und mit dem Ergebnis weiterbauen. Ein frei
+  gewaehlter Achsabstand hat schon einmal fuenf Zahnradpaare erzeugt, deren
+  Zaehne sich nicht beruehrten (Kopfkreise 22+22 = 44 mm bei 50 mm Abstand).
+- Mehrere Exemplare desselben Skills brauchen UNTERSCHIEDLICHE Parameter, wo
+  sie sich unterscheiden sollen. Fuenf Gaenge mit je der Vorgabe `zaehne=20`
+  sind fuenfmal dasselbe 1:1-Paar, kein Getriebe.
 - Vorhandene Skills wiederverwenden (`skills_kopieren`), statt alles neu zu
   lernen. Dasselbe gilt für die Werkzeuge dieser Installation: Zahnräder macht
   das Add-on besser als ein neuer Skill (`befehl: FCGear_InvoluteGear`), und

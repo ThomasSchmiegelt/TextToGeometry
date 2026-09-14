@@ -2359,8 +2359,9 @@ class T2GPanel(QWidget):
         doc = _active_doc()
         ctx = T2GCore.describe_document(_doc_objects(doc), _selection_names())
         pblock = self._project.as_prompt_block() if self._project else ""
-        skills = self._skills_engine().registry.names()
-        T2GPanel._known_skills_hint = list(skills)
+        engine = self._skills_engine()
+        T2GPanel._known_skills_hint = list(engine.registry.names())
+        skills = T2GSkills.describe_skills(engine.registry.items())
         if not getattr(self, "_tools", None):
             try:
                 self._tools_scan()

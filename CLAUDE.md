@@ -220,6 +220,29 @@ teeth actually mesh, outer width = inner + 2 × wall). It exits 1 on any breach,
 it doubles as a regression test over the skills. The `.FCStd` is its *output* and
 stays gitignored — regenerate it rather than committing a binary.
 
+### What the agent is told about skills and tools
+
+Both blocks were once nearly content-free, and both cost a whole gearbox run:
+
+- `VERFÜGBARE SKILLS` was `", ".join(names)`. `T2GSkills.describe_skills()` now
+  renders description, parameters with defaults and units, and **`achse`** — the
+  axis the skill builds along (`T2G_SKILL["achse"]`, default `"z"`). `gehaeuse`
+  puts its shaft bores along X; the agent had laid the gearbox out along Z and
+  built the housing beside the assembly four times running, because no
+  translation can fix a wrong axis. With the axis declared it can turn the part
+  with `dreh_x/y/z`.
+- Every Python tool showed the *module* docstring, so twelve functions in
+  `getriebe_auslegung.py` produced twelve identical lines. `module_signatures()`
+  reads each function's own first docstring line and its argument list via AST,
+  and `ExternalTool.signature` carries it into the prompt — `achsabstand(modul,
+  z1, z2): Achsabstand a = m · (z1 + z2) / 2 [mm]`. The agent had guessed
+  `wellen_abstand = 50` with that function sitting unused, and produced gears
+  whose tip circles (22 + 22 = 44 mm) never touched.
+
+Hence two prompt rules: derived dimensions come from a tool when one exists, and
+several instances of one skill must differ in the parameters that distinguish
+them (five gears at the default `zaehne=20` are five identical 1:1 pairs).
+
 ### Parameters and the knowledge graph
 
 `ProjectParam` is one agreed value; the `maske` block is how the model asks for

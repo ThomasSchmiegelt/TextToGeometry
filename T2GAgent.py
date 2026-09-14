@@ -266,7 +266,12 @@ def build_agent_prompt(run: "AgentRun", project_block: str, doc_context: str,
     if doc_context.strip():
         parts += ["FREECAD-DOKUMENT", doc_context.strip(), ""]
     if skills:
-        parts += ["VERFÜGBARE SKILLS", ", ".join(skills), ""]
+        # A list of names is not enough: the agent needs the parameters and
+        # above all the axis a skill builds along, or it cannot place the part.
+        block = skills if isinstance(skills, str) else ", ".join(skills)
+        parts += ["VERFÜGBARE SKILLS (Achse = Richtung, in der der Skill baut; "
+                  "passt sie nicht zur Lage im Dokument, mit dreh_x/y/z beim "
+                  "skill_bauen drehen)", block, ""]
     if tools.strip():
         parts += ["WERKZEUGE DIESER INSTALLATION (statt selbst nachbauen)",
                   tools.strip(), ""]
