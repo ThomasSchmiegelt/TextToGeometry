@@ -191,6 +191,24 @@ Two hard-won details:
   which is exactly how the `"%s" % (a, b).strip()` precedence bug (strip applied
   to the tuple) hid for a whole run.
 
+### Placing parts
+
+`skill_bauen` takes `x/y/z` and `dreh_x/y/z` besides the skill parameters, and
+`als=` for the label. `_place_shape` copies the shape and sets only its
+`Placement` — it must never do anything that changes the volume. Before that
+existed the agent moved parts with free-form ```python and fused helper solids
+into them instead (a 44 mm gear came back 64 mm with five times the volume),
+which is why the prompt now forbids ```python for positioning outright.
+
+Part names and skill names are two namespaces: the project needs `zahnrad_3`,
+the registry holds `zahnrad`. `_resolve_skill_name()` goes via
+`SkillNeed.source`, then the name stem, and its error lists the skills that do
+exist — "unknown skill" alone cost twelve steps in one run.
+
+`_describe_build()` reports the resulting bounding box *in document
+coordinates*. Without the position the agent cannot tell ten stacked parts from
+ten placed ones, and happily reported success on a pile at the origin.
+
 ### Parameters and the knowledge graph
 
 `ProjectParam` is one agreed value; the `maske` block is how the model asks for
