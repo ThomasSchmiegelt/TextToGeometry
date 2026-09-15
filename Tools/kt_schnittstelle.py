@@ -172,6 +172,37 @@ def andocke(bauteil, eigener_punkt, ziel_punkt, gegenlaeufig=True,
                                            drehwinkel))
 
 
+def richte(bauteil, anschluss, ziel_punkt_name, ziel, richtung):
+    """Bauteil andocken und um den Anschluss in eine Richtung drehen.
+
+    Das Pleuel hängt am Hubzapfen und muss zur Zylinderachse zeigen. Erst
+    andocken, dann um die Zapfenachse drehen, bis das andere Auge in der
+    Zylinderachse liegt — die Drehung um den Anschluss verliert ihn nicht.
+    """
+    gesetzt = andocke(bauteil, anschluss, ziel)
+    a = gesetzt.punkt(anschluss).ort
+    b = gesetzt.punkt(ziel_punkt_name).ort
+    ist = b.sub(a)
+    achse = Vector(ziel.achse)
+    # Anteile senkrecht zur Zapfenachse vergleichen.
+    ist = ist.sub(achse.multiply(ist.dot(Vector(ziel.achse))))
+    soll = Vector(richtung)
+    soll = soll.sub(Vector(ziel.achse).multiply(
+        soll.dot(Vector(ziel.achse))))
+    if ist.Length < 1e-9 or soll.Length < 1e-9:
+        return gesetzt
+    ist.normalize()
+    soll.normalize()
+    cos = max(-1.0, min(1.0, ist.dot(soll)))
+    winkel = math.degrees(math.acos(cos))
+    if ist.cross(soll).dot(Vector(ziel.achse)) < 0:
+        winkel = -winkel
+    dreh = FreeCAD.Placement(a, FreeCAD.Rotation(Vector(ziel.achse), winkel),
+                             Vector(0, 0, 0))
+    return gesetzt.bewegt(FreeCAD.Placement(
+        dreh.Base.sub(dreh.Rotation.multVec(dreh.Base)), dreh.Rotation))
+
+
 def pruefe_paarung(a, b, ort_tol=0.01, winkel_tol=1.0, mass_tol=0.5):
     """Liegen zwei Anschlusspunkte wirklich aufeinander?
 

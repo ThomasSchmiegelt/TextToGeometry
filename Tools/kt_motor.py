@@ -1,18 +1,21 @@
 # SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary
-"""Kurbeltriebsgenerator — setzt die Bauteile über ihre Andockpunkte zusammen.
+"""Gesamtmotor — fügt Kurbeltrieb, Ventiltrieb und Getriebe zusammen.
 
-    teile = baue(bauform="V8", bohrung=86.0, hub=86.0)
+    teile, kenn, proben = baue(bauform="V8", bohrung=86.0, hub=86.0)
 
-Hier wird nichts gerechnet, was ein Bauteil schon weiß. Der Kolben kennt
-seine Kompressionshöhe, das Pleuel sein Stichmaß, die Kurbelwelle ihre
-Zapfenwinkel — dieses Skript fügt sie zusammen und prüft, dass es passt.
+Diese Datei rechnet und zeichnet nichts mehr selbst. Sie legt die Auslegung
+fest (``kennwerte``), ruft die beiden Baugruppen auf und misst das Ergebnis
+nach (``pruefe``):
 
-Der Aufbau je Zylinder:
+    kt_kurbeltrieb   Kurbelwelle, Pleuel, Kolben
+    kt_ventiltrieb   Ventile, Federn, Stößel, Nockenwellen, Steuertrieb
+    kt_kinematik     die Formeln, die beide brauchen
+    getriebe_fcgear  optional hinter den Schwungradflansch gesetzt
 
-    Kurbelwelle.hubzapfen_k  ← Pleuel.hubzapfen
-    Pleuel.kolbenbolzen      → Kolben.bolzen
-    Ventil.schaft_ende       ← Stößel.ventil
-    Nockenwelle.nocken_i     über dem Stößelboden
+Darunter liegt je Bauteil ein eigenes Skript — ``kt_kolben``, ``kt_pleuel``,
+``kt_kurbelwelle``, ``kt_ventil``, ``kt_ventilfeder``, ``kt_stoessel``,
+``kt_nockenwelle``, ``kt_steuertrieb`` — und ``kt_schnittstelle``, über die
+sie zusammenfinden. Jedes davon hat seinen eigenen ``selbsttest()``.
 
 Die Blockhöhe folgt aus dem Kurbeltrieb und wird nicht geraten:
 
@@ -21,10 +24,6 @@ Die Blockhöhe folgt aus dem Kurbeltrieb und wird nicht geraten:
 Das ist die Strecke von der Kurbelwellenmitte bis zum Kolbenboden im oberen
 Totpunkt. Wer sie unabhängig eingibt, bekommt entweder einen Kolben, der oben
 heraussteht, oder einen, der nie hinkommt.
-
-Nur die Kurbelwelle ist ein einzelnes Bauteil; alles andere entsteht **einmal**
-und wird kopiert. Eine Ventilfeder zu bauen dauert Sekunden, und ein V12 mit
-vier Ventilen bräuchte achtundvierzig davon.
 """
 
 import math
@@ -33,15 +32,11 @@ import FreeCAD
 from FreeCAD import Vector
 
 import kt_bauformen as B
-import kt_kolben
-import kt_kurbelwelle
-import kt_nockenwelle
+import kt_kinematik as K
+import kt_kurbeltrieb
 import kt_pleuel
 import kt_schnittstelle as S
-import kt_steuertrieb
-import kt_stoessel
-import kt_ventil
-import kt_ventilfeder
+import kt_ventiltrieb
 
 
 class MotorFehler(Exception):
@@ -49,8 +44,12 @@ class MotorFehler(Exception):
 
 
 def blockhoehe(hub, stichmass, kompressionshoehe):
-    """Kurbelwellenmitte bis Kolbenboden im oberen Totpunkt [mm]."""
-    return float(hub) / 2.0 + float(stichmass) + float(kompressionshoehe)
+    """Kurbelwellenmitte bis Kolbenboden im oberen Totpunkt [mm].
+
+    Steht in ``kt_kinematik``; hier nur weitergereicht, weil Aufrufer und
+    Tests sie seit je unter diesem Namen erwarten.
+    """
+    return K.blockhoehe(hub, stichmass, kompressionshoehe)
 
 
 def kennwerte(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
@@ -75,7 +74,8 @@ def kennwerte(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
         # auf demselben Hubzapfen, die Zylinderbaenke stehen deshalb um eine
         # Pleuelbreite gegeneinander versetzt. Das ist kein Schoenheitsfehler,
         # sondern folgt zwingend aus dem geteilten Zapfen.
-        "bankversatz": _bankversatz(bauform, pleuel_breite, v8_kreuzebene),
+        "bankversatz": K.bankversatz(bauform, pleuel_breite,
+                                     v8_kreuzebene),
         "nockenwellen": 2 if B.ist_v(bauform) else 1,
     })
     if B.ist_v(bauform):
@@ -85,107 +85,6 @@ def kennwerte(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
     return k
 
 
-def _nockenhub(winkel_grad, hub, grundkreis_r=16.0, flanke=60.0,
-               stoessel_winkel=180.0, schritte=180):
-    """Hub, den der Nocken einem FLACHSTÖSSEL gerade gibt [mm].
-
-    Bei einem Flachstößel ist der Hub nicht der radiale Abstand in
-    Stößelrichtung, sondern die größte Projektion der ganzen Nockenkontur auf
-    diese Richtung: der Berührpunkt wandert seitlich aus. Mit dem radialen
-    Maß gerechnet blieb eine Durchdringung von 4,8 % zwischen Nockenwelle und
-    Stößel — die Welle sass zu tief.
-
-    ``stoessel_winkel`` ist die Richtung, in der der Stößel steht — beim
-    Reihenmotor 180° (senkrecht nach unten), bei einer um den Bankwinkel
-    geneigten Bank entsprechend gedreht. Mit festen 180° gerechnet stimmte
-    der Hub bei V-Motoren nicht, und die Nockenwelle durchdrang die Stößel.
-    """
-    rg = float(grundkreis_r)
-    h = float(hub)
-    fl = float(flanke)
-    spitze = math.radians(float(winkel_grad))
-    stoessel = math.radians(float(stoessel_winkel))
-    groesste = rg
-    for i in range(int(schritte)):
-        a = 2.0 * math.pi * i / float(schritte)
-        d = math.degrees((a - spitze + math.pi) % (2.0 * math.pi) - math.pi)
-        r = rg + (h * 0.5 * (1.0 + math.cos(math.pi * d / fl))
-                  if abs(d) < fl else 0.0)
-        groesste = max(groesste, r * math.cos(a - stoessel))
-    return max(0.0, groesste - rg)
-
-
-def _bankversatz(bauform, pleuel_breite, v8_kreuzebene=True):
-    """Axialer Versatz der zweiten Zylinderbank [mm].
-
-    Beim V-Motor sitzen die beiden Pleuel nebeneinander auf demselben
-    Hubzapfen — die Bänke stehen deshalb zwangsläufig gegeneinander versetzt.
-    Wie weit, hängt vom Zapfen ab:
-
-    * ungeteilter Zapfen: um eine Pleuelbreite (V8, V10, V12)
-    * geteilter Zapfen: um eine halbe Zapfenbreite, denn die beiden Hälften
-      liegen selbst schon hintereinander (V4, V6) — gemessen 24 statt 22 mm
-    """
-    if not B.ist_v(bauform):
-        return 0.0
-    b = float(pleuel_breite)
-    if B.hubzapfenversatz(bauform, v8_kreuzebene):
-        return (2.0 * b + 4.0) / 2.0
-    return b
-
-
-def _kolbenweg(kurbelwinkel_grad, kurbelradius, stichmass):
-    """Wie weit der Kolben vom oberen Totpunkt heruntergelaufen ist [mm].
-
-    Die Schubkurbel:  s = r(1 - cos phi) + l(1 - sqrt(1 - lambda^2 sin^2 phi)),
-    mit lambda = r/l. Bei phi = 0 ist der Kolben oben, s = 0.
-    """
-    phi = math.radians(float(kurbelwinkel_grad))
-    r = float(kurbelradius)
-    l = float(stichmass)
-    lam = r / l if l else 0.0
-    wurzel = max(0.0, 1.0 - (lam * math.sin(phi)) ** 2)
-    return r * (1.0 - math.cos(phi)) + l * (1.0 - math.sqrt(wurzel))
-
-
-def _pleuelrichtung(hubzapfen, achse, stichmass):
-    """Richtung vom Hubzapfen zum Kolbenbolzen.
-
-    Der Kolbenbolzen liegt auf der Zylinderachse (einer Geraden durch die
-    Kurbelwellenmitte in Richtung ``achse``), im Abstand ``stichmass`` vom
-    Hubzapfen. Das ist die Schubkurbel: aus
-
-        |t·achse − P| = l
-
-    folgt ``t = achse·P + sqrt((achse·P)² − |P|² + l²)``. Die positive
-    Wurzel ist der Kolben oberhalb der Kurbel.
-    """
-    p = Vector(hubzapfen)
-    a = Vector(achse)
-    a.normalize()
-    # Nur die Ebene senkrecht zur Kurbelwelle zaehlt; x bleibt, wie es ist.
-    p_eben = Vector(0.0, p.y, p.z)
-    ap = a.dot(p_eben)
-    wurzel = ap * ap - p_eben.Length ** 2 + float(stichmass) ** 2
-    if wurzel < 0.0:
-        raise MotorFehler(
-            "Das Stichmass %.1f mm reicht nicht bis zur Zylinderachse — der "
-            "Kurbelradius ist zu gross." % float(stichmass))
-    t = ap + math.sqrt(wurzel)
-    bolzen = Vector(p.x, a.y * t, a.z * t)
-    richtung = bolzen.sub(p)
-    if richtung.Length < 1e-9:
-        return Vector(a)
-    richtung.normalize()
-    return richtung
-
-
-def _zylinderachse(bankwinkel_grad):
-    """Richtung der Zylinderachse: aus der Senkrechten um den Bankwinkel."""
-    w = math.radians(float(bankwinkel_grad))
-    return Vector(0.0, math.sin(w), math.cos(w))
-
-
 def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
          kompressionshoehe=32.0, zylinderabstand=0.0, bolzen_d=22.0,
          hubzapfen_d=48.0, hauptlager_d=54.0, ventile_je_zylinder=4,
@@ -193,7 +92,7 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
          spreizung=110.0, ventilwinkel=12.0, pleuel_breite=22.0,
          v8_kreuzebene=True, mit_ventiltrieb=True, mit_getriebe=False,
          getriebe_gaenge=5, doc=None):
-    """Ein vollständiger Kurbeltrieb als Liste von (Bezeichnung, Shape).
+    """Ein vollständiger Motor als Liste von (Bezeichnung, Shape).
 
     bauform             R2 … V12
     bohrung, hub        [mm]
@@ -220,353 +119,42 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
                   pleuel_breite)
     l = k["stichmass"]
     za = k["zylinderabstand"]
-    z, bank = B.daten(bauform)
     doc = doc or FreeCAD.ActiveDocument or FreeCAD.newDocument("Motor")
 
-    teile = []
-    proben = []          # (Punkt A, Punkt B) für die Paarungsprüfung
-
-    # --- Kurbelwelle ------------------------------------------------------
-    # Beim V-Motor teilen sich zwei Pleuel einen Hubzapfen — er muss also
-    # doppelt so breit sein, und die beiden sitzen NEBENEINANDER. Uebereinander
-    # gesetzt durchdrangen sie sich zu 53,6 %.
-    pleuel_b = float(pleuel_breite)
-    zapfen_b = (2.0 * pleuel_b + 4.0) if B.ist_v(bauform) else 26.0
-    k["bankversatz"] = _bankversatz(bauform, pleuel_b, v8_kreuzebene)
-    kw = kt_kurbelwelle.baue(bauform=bauform, hub=hub, zylinderabstand=za,
-                             hauptlager_d=hauptlager_d,
-                             hubzapfen_d=hubzapfen_d,
-                             hubzapfen_b=zapfen_b,
-                             v8_kreuzebene=v8_kreuzebene)
-    teile.extend(kw.koerper)
-
-    # --- Kolben und Pleuel, einmal gebaut und dann kopiert ---------------
-    # Ventiltaschen: dieselben Versaetze wie die Ventile, aber im
-    # Kolbenkoordinatensystem. Der Kolben wird ueber seinen Bolzen
-    # angedockt, und der liegt spaeter auf der Kurbelwellenachse — aus
-    # kolbenlokal +Y wird also die x-Richtung des Motors.
-    einlass_probe = kt_ventil.vorschlag(bohrung, ventile_je_zylinder, True)
-    auslass_probe = kt_ventil.vorschlag(bohrung, ventile_je_zylinder, False)
-    je_seite_probe = max(1, int(ventile_je_zylinder) // 2)
-    # Die Taschen werden SYMMETRISCH gesetzt, an allen vier Stellen. Welche
-    # Seite beim V-Motor spaeter Ein- und welche Auslass ist, haengt von der
-    # Bank ab — mit gerichteten Taschen landeten sie bei einer Bank
-    # spiegelverkehrt, und das Ventil schlug in den Kolbenboden.
+    # Die Ventiltaschen muessen im Kolben stehen, bevor er gebaut wird —
+    # ihre Tiefe kommt aber aus der Ventilsteuerung. Deshalb rechnet die
+    # Kinematik sie vorweg, ohne dass ein Ventil existieren muss.
     taschen = []
     if mit_ventiltrieb:
-        # Die Taschentiefe wird nicht geraten, sondern aus dem groessten Hub
-        # bestimmt, den irgendein Ventil dieses Motors gerade hat. Mit einer
-        # festen Tiefe von 4 mm blieben bei V10 und V12 noch 2,5 bis 9,3 %
-        # Durchdringung — genau der Betrag, um den ein Ventil tiefer stand.
-        lagen_probe = B.zylinderlagen(bauform, za, v8_kreuzebene)
-        versatz_probe = B.hubzapfenversatz(bauform, v8_kreuzebene)
-        kw_probe = B.zapfenwinkel(bauform, v8_kreuzebene)
-        # Nicht der groesste Hub bestimmt die Tasche, sondern der
-        # Ueberstand des Ventils UEBER dem Kolbenboden. Der Kolben ist dann
-        # meist schon ein Stueck heruntergelaufen. Mit dem vollen Hub
-        # gerechnet wurden die Taschen 13 mm tief statt der ueblichen 2...4.
-        noetig = 0.0
-        for _s, _x, bw, zapfen in lagen_probe:
-            kwz = kw_probe[zapfen]
-            if _s == 1 and versatz_probe:
-                kwz += versatz_probe
-            weg = _kolbenweg(kwz, float(hub) / 2.0, l)
-            for art in ("einlass", "auslass"):
-                vk = float(spreizung) * (1.0 if art == "einlass" else -1.0)
-                w = ((kwz + vk) / 2.0
-                     + (0.0 if art == "einlass" else 180.0)) % 360.0
-                lift = _nockenhub(w, ventilhub, 16.0, stoessel_winkel=180.0)
-                noetig = max(noetig, lift - weg)
-        tiefe = round(max(1.0, noetig) + 1.5, 2)
-        d_tasche = max(einlass_probe, auslass_probe) + 8.0
-        for vz_quer in (-1.0, 1.0):
-            for vz_laengs in (-1.0, 1.0):
-                taschen.append((vz_quer * einlass_probe * 0.6,
-                                vz_laengs * einlass_probe * 0.55,
-                                d_tasche, tiefe))
+        tiefe = K.taschentiefe(bauform, hub, l, za, ventilhub, spreizung,
+                               kt_ventiltrieb.GRUNDKREIS_R, v8_kreuzebene)
+        taschen = kt_ventiltrieb.ventiltaschen(bohrung, ventile_je_zylinder,
+                                               tiefe)
+        k["taschentiefe"] = tiefe
 
-    kolben_muster = kt_kolben.baue(bohrung=bohrung,
-                                   kompressionshoehe=kompressionshoehe,
-                                   bolzen_d=bolzen_d,
-                                   ventiltaschen=taschen)
-    pleuel_muster = kt_pleuel.baue(stichmass=l, hubzapfen_d=hubzapfen_d,
-                                   bolzen_d=bolzen_d, breite=pleuel_b)
+    teile, proben, kw, zylinder_x = kt_kurbeltrieb.baue(
+        bauform=bauform, bohrung=bohrung, hub=hub, stichmass=l,
+        kompressionshoehe=kompressionshoehe, zylinderabstand=za,
+        bolzen_d=bolzen_d, hubzapfen_d=hubzapfen_d,
+        hauptlager_d=hauptlager_d, pleuel_breite=pleuel_breite,
+        v8_kreuzebene=v8_kreuzebene, ventiltaschen=taschen)
 
-    lagen = B.zylinderlagen(bauform, za, v8_kreuzebene)
-    versatz = B.hubzapfenversatz(bauform, v8_kreuzebene)
-    zylinder_x = {}
+    if mit_ventiltrieb:
+        vt_teile, vt_proben, vt_kenn = kt_ventiltrieb.baue(
+            bauform=bauform, bohrung=bohrung, blockhoehe=k["blockhoehe"],
+            zylinder_x=zylinder_x, zylinderabstand=za,
+            ventile_je_zylinder=ventile_je_zylinder, ventilhub=ventilhub,
+            spreizung=spreizung, ventilwinkel=ventilwinkel,
+            steuertrieb=steuertrieb, zaehne_kurbel=zaehne_kurbel,
+            kurbelnase=kw.punkt("steuertrieb"),
+            v8_kreuzebene=v8_kreuzebene, doc=doc)
+        teile.extend(vt_teile)
+        proben.extend(vt_proben)
+        k.update(vt_kenn)
 
-    for nr, (seite, _x, bankwinkel, zapfen) in enumerate(lagen, 1):
-        # Welchen Hubzapfen? Bei geteiltem Zapfen die Haelfte der Bank.
-        name = "hubzapfen_%d" % (zapfen + 1)
-        if versatz and B.ist_v(bauform):
-            name = "hubzapfen_%d%s" % (zapfen + 1, "a" if seite == 0 else "b")
-        ziel = kw.punkt(name)
-        if B.ist_v(bauform) and not versatz:
-            # Ungeteilter Zapfen: die beiden Baenke nebeneinander setzen.
-            ziel = S.Punkt(ziel.name,
-                           Vector(ziel.ort).add(Vector(
-                               (pleuel_b / 2.0) * (-1.0 if seite == 0
-                                                   else 1.0), 0, 0)),
-                           ziel.achse, ziel.art, ziel.mass, ziel.hinweis)
-
-        # Der KOLBEN laeuft auf der Zylinderachse, nicht das Pleuel. Das
-        # Pleuel steht schraeg — genau das ist der Schubkurbeltrieb. Vorher
-        # war das Pleuel parallel zur Zylinderachse gerichtet, und die
-        # Kolben einer Bank lagen dadurch nicht auf einer Linie: bei Bank A
-        # eines V8 auf (-100,8|143,8), (-143,8|100,8), (-57,8|100,8) statt
-        # auf der Bankachse.
-        richtung = _zylinderachse(bankwinkel)
-        pleuel = _richte(pleuel_muster, "hubzapfen", "kolbenbolzen", ziel,
-                         _pleuelrichtung(ziel.ort, richtung, l))
-        teile.extend([("Pleuel %d" % nr, s) for _n, s in pleuel.koerper])
-        proben.append((pleuel.punkt("hubzapfen"), ziel))
-
-        # Andocken legt die Verdrehung UM die Bolzenachse nicht fest — die
-        # kuerzeste Drehung traf beim Reihenmotor zufaellig, beim V-Motor
-        # nicht, und die Ventiltaschen standen schief zu den Ventilen
-        # (11 bis 24 % Durchdringung). Deshalb wird der Kolben wie das
-        # Pleuel ausgerichtet: sein Boden zeigt die Zylinderachse entlang.
-        kolben = _richte(kolben_muster, "bolzen", "boden",
-                         pleuel.punkt("kolbenbolzen"), richtung)
-        teile.extend([("Kolben %d" % nr, s) for _n, s in kolben.koerper])
-        proben.append((kolben.punkt("bolzen"), pleuel.punkt("kolbenbolzen")))
-        # Wo dieser Zylinder wirklich steht — nicht wo sein Hubzapfen sitzt.
-        # Beim V-Motor sind die beiden Pleuel um die halbe Breite versetzt,
-        # und die Ventile standen dadurch 28 mm neben ihrem Kolben.
-        zylinder_x[nr] = kolben.punkt("bolzen").ort.x
-
-    if not mit_ventiltrieb:
-        return teile, k, proben
-
-    # --- Ventiltrieb ------------------------------------------------------
-    einlass_d = kt_ventil.vorschlag(bohrung, ventile_je_zylinder, True)
-    auslass_d = kt_ventil.vorschlag(bohrung, ventile_je_zylinder, False)
-    ventil_l = round(k["blockhoehe"] * 0.5 + 40.0, 1)
-    muster = {
-        "einlass": kt_ventil.baue(teller_d=einlass_d, laenge=ventil_l,
-                                  name="Einlassventil"),
-        "auslass": kt_ventil.baue(teller_d=auslass_d, laenge=ventil_l,
-                                  name="Auslassventil"),
-    }
-    feder_muster = kt_ventilfeder.baue(einbaulaenge=42.0, hub=ventilhub)
-    stoessel_muster = kt_stoessel.baue()
-
-    # Wie hoch liegt die Nockenwellenachse? So, dass der Grundkreis den
-    # Stoessel eines geschlossenen Ventils gerade beruehrt.
-    nocken_grundkreis_r = 16.0
-    stoessel_h = stoessel_muster.kennwerte["hoehe"]
-    achshoehe = (k["blockhoehe"] + ventil_l + stoessel_h
-                 + nocken_grundkreis_r)
-    kurbelwinkel = B.zapfenwinkel(bauform, v8_kreuzebene)
-
-    je_seite = max(1, int(ventile_je_zylinder) // 2)
-    nockenachsen = {}
-    fluchtungen = []
-    for nr, (seite, _x, bankwinkel, zapfen) in enumerate(lagen, 1):
-        richtung = _zylinderachse(bankwinkel)
-        mitte = Vector(zylinder_x[nr], 0.0, 0.0)
-        for j in range(int(ventile_je_zylinder)):
-            art = "einlass" if j < je_seite else "auslass"
-            # Vector.multiply() skaliert IN PLACE. `richtung` einmal zu
-            # multiplizieren hat sie fuer die naechste Runde veraendert, und
-            # die Ventile sind in Zehnerpotenzen davongeflogen: 2e5, 1.8e8,
-            # 1.65e11. Deshalb hier jede Richtung frisch bauen.
-            quer = Vector(1, 0, 0).cross(richtung)
-            if quer.Length < 1e-9:
-                quer = Vector(0, 1, 0)
-            quer.normalize()
-            # Ein- und Auslass liegen QUER zur Kurbelwelle (dort laufen die
-            # beiden Nockenwellen), die beiden Ventile einer Sorte laengs.
-            # Andersherum saessen beide Nockenwellen uebereinander.
-            seitwaerts = (-1.0 if art == "einlass" else 1.0) * einlass_d * 0.6
-            laengs = (-1.0 if (j % je_seite) == 0 else 1.0) * einlass_d * 0.55
-
-            # Wie weit hat der Nocken dieses Ventil gerade geoeffnet? Der
-            # Nockenwinkel ist der halbe Kurbelwinkel; der Auslass eilt um
-            # eine halbe Umdrehung vor. Ohne diese Rechnung muesste die
-            # Nockenwelle freigestellt werden und haette die Stoessel
-            # durchdrungen (gemessen 28,3 %).
-            # Die Spreizung: der Nockenscheitel liegt rund 110 Grad
-            # Kurbelwinkel NACH dem oberen Totpunkt (Einlass) bzw. davor
-            # (Auslass), nicht im Totpunkt selbst. Genau dafuer ist sie da —
-            # ohne Spreizung stand Zylinder 4 im OT mit voll geoeffnetem
-            # Einlassventil, und Kolben und Ventil durchdrangen sich zu
-            # 51,7 %. Das ist keine Modellschwaeche, sondern der Grund,
-            # warum es die Spreizung gibt.
-            versatz_kw = float(spreizung) * (1.0 if art == "einlass" else -1.0)
-            # Bank B sitzt beim geteilten Hubzapfen auf der um den Versatz
-            # weitergedrehten Haelfte — ihr oberer Totpunkt liegt also
-            # entsprechend spaeter. Mit dem Nennwinkel gerechnet oeffneten
-            # ihre Ventile zur falschen Zeit und schlugen in den Kolben
-            # (V6, V10, V12: 2,5 bis 10,4 % Durchdringung).
-            kw_zyl = kurbelwinkel[zapfen]
-            if seite == 1 and versatz:
-                kw_zyl += versatz
-            nw_winkel = ((kw_zyl + versatz_kw) / 2.0
-                         + (0.0 if art == "einlass" else 180.0)) % 360.0
-            # Der Stoessel steht in Richtung der Zylinderachse: ein Nocken
-            # zeigt bei w auf (0, -sin w, cos w), die Zylinderachse liegt bei
-            # bankwinkel — der Stoessel also bei 180 - bankwinkel.
-            # Die Nockenwelle wird um denselben Winkel gekippt wie ihre
-            # Ventile, im Wellenbild steht der Stoessel also wieder bei 180.
-            hub_jetzt = _nockenhub(nw_winkel, ventilhub,
-                                   nocken_grundkreis_r,
-                                   stoessel_winkel=180.0)
-            neigung = float(ventilwinkel) * (-1.0 if art == "einlass"
-                                             else 1.0)
-            v_richtung = FreeCAD.Rotation(Vector(1, 0, 0), neigung) \
-                .multVec(Vector(richtung))
-            # Ein Ventil oeffnet entlang SEINER EIGENEN Achse, nicht entlang
-            # der Zylinderachse. Mit dem Hub auf der Zylinderachse gerechnet
-            # wandert die Nockenwellenachse mit dem Hub, und die Wellen
-            # passten je Zylinder nicht mehr auf ihre Stoessel (11 %
-            # Durchdringung bei den V-Motoren).
-            hoch = Vector(richtung).multiply(k["blockhoehe"])
-            quer_v = Vector(quer).multiply(seitwaerts)
-            fuss = Vector(mitte).add(hoch).add(Vector(laengs, 0, 0)) \
-                .add(quer_v).sub(Vector(v_richtung).multiply(hub_jetzt))
-            # Zwei Flaechen, die sich beruehren, haben ENTGEGENGESETZTE
-            # Normalen. Die Sitzflaeche des Ventils zeigt nach unten (in den
-            # Brennraum), also muss der Sitz im Kopf nach oben zeigen — sonst
-            # wird das Ventil beim Andocken umgedreht und haengt mit dem
-            # Schaft nach unten im Block (gemessen: z 72,7…225,5 statt
-            # aufwaerts).
-            # Das Ventil steht geneigt: Einlass und Auslass kippen
-            # gegenlaeufig aus der Zylinderachse. Ohne diesen Winkel stehen
-            # beide Nockenwellen uebereinander und durchdringen sich.
-            neigung = float(ventilwinkel) * (-1.0 if art == "einlass"
-                                             else 1.0)
-            v_richtung = FreeCAD.Rotation(Vector(1, 0, 0), neigung) \
-                .multVec(Vector(richtung))
-            ziel = S.Punkt("ventilsitz_%d_%d" % (nr, j + 1), fuss,
-                           v_richtung, "flaeche",
-                           muster[art].kennwerte["teller_d"])
-            ventil = S.andocke(muster[art], "sitz", ziel)
-            teile.extend([("%s %d.%d" % (muster[art].name, nr, j + 1), s)
-                          for _n, s in ventil.koerper])
-            st = S.andocke(stoessel_muster, "ventil",
-                           ventil.punkt("schaft_ende"))
-            teile.extend([("%s %d.%d" % (n, nr, j + 1), s)
-                          for n, s in st.koerper])
-            proben.append((st.punkt("ventil"), ventil.punkt("schaft_ende")))
-            # Bei einem Tassenstoesselmotor liegt die Nockenwellenachse
-            # GENAU UEBER der Ventilachse — der Nocken drueckt senkrecht auf
-            # den Tassenboden. Die Achse wird deshalb aus dem Stoessel
-            # abgeleitet, nicht aus der Zylinderachse: bei geneigten Ventilen
-            # sind das zwei verschiedene Geraden, und das Ergebnis sah aus
-            # wie ein Schlepphebelmotor.
-            nocken_achse = Vector(st.punkt("nocken").ort).add(
-                Vector(v_richtung).multiply(
-                    nocken_grundkreis_r + hub_jetzt))
-            # Der Kippwinkel der Nockenwelle: im Wellenbild zeigt 180 Grad
-            # nach -Z; nach der Drehung um kippung muss das -v_richtung
-            # sein. Aus Rot(X, d)*(0,0,-1) = (0, sin d, -cos d) und
-            # -v_richtung = (0, -sin phi, -cos phi) folgt d = -phi, und phi
-            # ist der Winkel von v_richtung, also bankwinkel - neigung.
-            # Mit bankwinkel + neigung gerechnet stimmte es nur fuer
-            # Reihenmotoren (bankwinkel = 0); bei den V-Motoren stand die
-            # Welle 90 Grad daneben und drueckte in die Stoessel.
-            nockenachsen.setdefault((seite, art), []).append(
-                (nocken_achse, v_richtung, nw_winkel,
-                 neigung - bankwinkel))
-            # Fuer die Pruefung: Stoesselachse und die Achse, auf der die
-            # Nockenwelle liegen wird.
-            fluchtungen.append((Vector(st.punkt("nocken").ort),
-                                Vector(v_richtung), Vector(nocken_achse),
-                                "%s %d.%d" % (art, nr, j + 1)))
-            # Die Feder sitzt mit ihrem Teller am Schaftende. Hier stossen
-            # NICHT zwei Flaechen gegeneinander: Tellerkante und Schaftende
-            # zeigen beide nach oben, die Feder haengt darunter. Mit der
-            # gegenlaeufigen Paarung wird sie umgedreht und steht ueber dem
-            # Ventil (gemessen: z 382…424 statt 336…378).
-            feder = S.andocke(feder_muster, "oben",
-                              ventil.punkt("schaft_ende"),
-                              gegenlaeufig=False)
-            teile.extend([("%s %d.%d" % (n, nr, j + 1), s)
-                          for n, s in feder.koerper])
-            # Die Lage der Feder wird nicht als Paarung gefuehrt: Tellerrand
-            # und Schaftdurchmesser sind verschiedene Masse, die Pruefung
-            # meldete zu Recht 30 gegen 6 mm. Dass sie richtig sitzt, zeigt
-            # die Durchdringungspruefung.
-
-    # --- Nockenwellen -----------------------------------------------------
-    # Eine je Bank und Ventilsorte, und jede genau dort, wo ihre Stoessel
-    # stehen — die Lage kommt aus den Ventilen, nicht aus einer Schaetzung.
-    hoehe = achshoehe
-    nocken_lage = {}
-    for lfd, ((seite, art), eintraege) in enumerate(
-            sorted(nockenachsen.items()), 1):
-        # Ein Nocken JE VENTIL, an der x-Lage seines Stoessels. Mit
-        # gleichmaessiger Teilung bekam ein Vierventiler acht Nocken im
-        # Zylinderabstand und eine 822 mm lange Welle.
-        eintraege = sorted(eintraege, key=lambda e: e[0].x)
-        winkel = [w for _o, _r, w, _k in eintraege]
-        orte = [o.x for o, _r, _w, _k in eintraege]
-        nw = kt_nockenwelle.baue(winkel=winkel, orte=orte, hub=ventilhub,
-                                 grundkreis_d=2.0 * nocken_grundkreis_r)
-        ort0, richtung0, _w, kippung = eintraege[0]
-        achse = Vector(ort0)      # schon die fertige Nockenwellenachse
-        # Die Welle wird in x schon richtig gebaut, quer versetzt UND um
-        # denselben Winkel gekippt wie ihre Ventile — dann stehen ihre
-        # Nocken senkrecht auf den Stoesseln.
-        versch = FreeCAD.Placement(
-            Vector(0.0, achse.y, achse.z),
-            FreeCAD.Rotation(Vector(1, 0, 0), kippung))
-        gesetzt = nw.bewegt(versch)
-        teile.extend([("Nockenwelle %d (%s)" % (lfd, art), s)
-                      for _n, s in gesetzt.koerper])
-        nocken_lage.setdefault(seite, []).append(
-            (art, Vector(0.0, achse.y, achse.z)))
-        k.setdefault("nockenachsen", []).append(
-            {"bank": seite + 1, "art": art,
-             "y": round(achse.y, 2), "z": round(achse.z, 2)})
-
-    # --- Steuertrieb: JE BANK einer, ueber ALLE Nockenwellen --------------
-    # Ein V-Motor hat zwei Zylinderbaenke mit je eigenen Nockenwellen, und
-    # jede braucht ihren Antrieb. Innerhalb einer Bank haengen bei einem
-    # DOHC-Kopf BEIDE Wellen an derselben Kette — Einlass und Auslass. Wird
-    # nur eine angetrieben, laeuft die andere gar nicht.
-    nase = kw.punkt("steuertrieb")
-    anzahl = max(1, len(nocken_lage))
-    for seite in sorted(nocken_lage) or [0]:
-        wellen = nocken_lage.get(seite) or [("einlass", Vector(0, 0, hoehe))]
-        # Der Trieb wird gleich in Dokumentkoordinaten gebaut: die Lagen
-        # der Nockenwellen sind schon die richtigen. Frueher wurde ein
-        # ebener Trieb um X gekippt — mit zwei Wellen je Bank, die
-        # verschieden weit von der Kurbel stehen, geht das nicht mehr auf.
-        lagen = [(w.y, w.z) for _art, w in wellen]
-        abstand_nw = max(math.hypot(y, z) for y, z in lagen) or hoehe
-        st = kt_steuertrieb.baue(art=steuertrieb,
-                                 zaehne_kurbel=zaehne_kurbel,
-                                 achsabstand=abstand_nw,
-                                 nocken_lagen=lagen, doc=doc)
-        # Die Kurbelraeder der beiden Baenke sitzen NEBENEINANDER auf der
-        # Kurbelnase — uebereinander gesetzt durchdringen sie sich zu 100 %.
-        versatz_x = (seite - (anzahl - 1) / 2.0) * 16.0
-        ziel_nase = S.Punkt(nase.name,
-                            Vector(nase.ort).add(Vector(versatz_x, 0, 0)),
-                            nase.achse, nase.art, nase.mass, nase.hinweis)
-        gesetzt = S.andocke(st, "kurbel", ziel_nase)
-        teile.extend([("Bank %d: %s" % (seite + 1, n), sh)
-                      for n, sh in gesetzt.koerper])
-        proben.append((gesetzt.punkt("kurbel"), ziel_nase))
-        k.setdefault("steuertriebe", []).append(st.kennwerte)
-        # Fuer die Pruefung: jede Nockenwelle mit dem Ort ihres Rades.
-        for nr, (art, w) in enumerate(wellen, 1):
-            rad = gesetzt.punkt("nocken" if nr == 1 else "nocken_%d" % nr)
-            k.setdefault("angetrieben", []).append(
-                {"bank": seite + 1, "art": art,
-                 "welle_y": round(w.y, 3), "welle_z": round(w.z, 3),
-                 "rad_y": round(rad.ort.y, 3), "rad_z": round(rad.ort.z, 3)})
-    k["steuertrieb"] = k.get("steuertriebe", [{}])[0]
-
-    # --- Getriebe anflanschen --------------------------------------------
     if mit_getriebe:
         teile.extend(_getriebe_anflanschen(kw.punkt("abtrieb"), k, doc,
                                            getriebe_gaenge))
-
-    k["fluchtungen"] = fluchtungen
     return teile, k, proben
 
 
@@ -596,44 +184,6 @@ def _getriebe_anflanschen(abtrieb, k, doc, gaenge=5):
     k["getriebe"] = {"gaenge": int(gaenge), "teile": len(aus),
                      "anschluss_x": round(abtrieb.ort.x, 2)}
     return aus
-
-
-def _richte(bauteil, anschluss, ziel_punkt_name, ziel, richtung):
-    """Bauteil andocken und um den Anschluss in eine Richtung drehen.
-
-    Das Pleuel hängt am Hubzapfen und muss zur Zylinderachse zeigen. Erst
-    andocken, dann um die Zapfenachse drehen, bis das andere Auge in der
-    Zylinderachse liegt — die Drehung um den Anschluss verliert ihn nicht.
-    """
-    gesetzt = S.andocke(bauteil, anschluss, ziel)
-    a = gesetzt.punkt(anschluss).ort
-    b = gesetzt.punkt(ziel_punkt_name).ort
-    ist = b.sub(a)
-    achse = Vector(ziel.achse)
-    # Anteile senkrecht zur Zapfenachse vergleichen.
-    ist = ist.sub(achse.multiply(ist.dot(Vector(ziel.achse))))
-    soll = Vector(richtung)
-    soll = soll.sub(Vector(ziel.achse).multiply(
-        soll.dot(Vector(ziel.achse))))
-    if ist.Length < 1e-9 or soll.Length < 1e-9:
-        return gesetzt
-    ist.normalize()
-    soll.normalize()
-    cos = max(-1.0, min(1.0, ist.dot(soll)))
-    winkel = math.degrees(math.acos(cos))
-    if ist.cross(soll).dot(Vector(ziel.achse)) < 0:
-        winkel = -winkel
-    dreh = FreeCAD.Placement(a, FreeCAD.Rotation(Vector(ziel.achse), winkel),
-                             Vector(0, 0, 0))
-    return gesetzt.bewegt(FreeCAD.Placement(
-        dreh.Base.sub(dreh.Rotation.multVec(dreh.Base)), dreh.Rotation))
-
-
-def _zylindermitte(kw, lagen, index, zylinderabstand):
-    """x-Lage der Zylindermitte, aus dem Hubzapfen der Kurbelwelle."""
-    zapfen = lagen[index][3]
-    p = kw.punkt("hubzapfen_%d" % (zapfen + 1))
-    return Vector(p.ort.x, 0.0, 0.0)
 
 
 def pruefe(teile=None, proben=None, kenn=None, toleranz=0.02, **kw):

@@ -28,7 +28,7 @@ python3 test_agent.py   # 24 tests: agent protocol, action registry, run budget
 FreeCADCmd test_skills.py   # skills engine — needs the REAL Part module (see gotcha)
 FreeCADCmd test_bauen.py    # 32 checks: placement, replace, collisions, bearing, tools
 FreeCADCmd test_getriebe_makro.py  # 32 checks: mask, DIN 625, housing, FCGear
-FreeCADCmd test_kurbeltrieb.py     # 25 checks: parts, docking, R2…V12 (T2G_TEST_LANG=1 for all ten)
+FreeCADCmd test_kurbeltrieb.py     # 40 checks: parts, docking, R2…V12 (T2G_TEST_LANG=1 for all ten)
 FreeCADCmd Beispiele/getriebe_5gang.py   # reference gearbox; exits 1 if a promise breaks
 FreeCADCmd test_bauen.py    # 24 checks: placement, replace, collisions, bearing, mesh phase
 FreeCADCmd Beispiele/getriebe_5gang.py   # reference gearbox; exits 1 if a promise breaks
@@ -407,12 +407,35 @@ this workbench.
 
 ### The crank-drive generator: interfaces, not coordinates
 
-`Tools/kt_*.py` — one script per part, as asked. The point of the whole thing
-is `kt_schnittstelle.py`: every part returns its bodies **and** its connection
-points (position, axis, kind, size), and the assembly docks them instead of
-computing coordinates. `andocke()` moves bodies and points together, which is
-why the interfaces still hold afterwards, and `pruefe_paarung()` measures that
-two points really coincide.
+`Tools/kt_*.py` — one script per part, as asked, in four layers, each with its
+own `selbsttest()` so a breakage names its own level:
+
+```
+kt_schnittstelle   Punkt / Bauteil / andocke / richte / pruefe_paarung
+kt_bauformen       R2…V12: pin angles, firing orders (tables, not formulas)
+kt_kinematik       slider-crank, cam lift, block height, bank offset — maths only
+  ↓
+kt_kolben  kt_pleuel  kt_kurbelwelle  kt_ventil  kt_ventilfeder
+kt_stoessel  kt_nockenwelle  kt_steuertrieb          — one part each
+  ↓
+kt_kurbeltrieb     crankshaft + rods + pistons
+kt_ventiltrieb     valves, springs, tappets, camshafts, timing drive
+  ↓
+kt_motor           kennwerte / baue / pruefe, plus the gearbox on the flange
+```
+
+`kt_motor.py` computes and draws nothing itself: it fixes the design figures,
+calls the two assemblies and measures the result. That split is what lets
+`kt_kinematik.selbsttest()` check the slider-crank against known values (TDC 0,
+BDC 2·r, full cam lift at 180°) without building a single solid.
+
+The point of the whole thing is `kt_schnittstelle.py`: every part returns its
+bodies **and** its connection points (position, axis, kind, size), and the
+assembly docks them instead of computing coordinates. `andocke()` moves bodies
+and points together, which is why the interfaces still hold afterwards, and
+`pruefe_paarung()` measures that two points really coincide. `richte()` docks
+and *then* turns the part about its connection until its other end points
+where it belongs — that is how the rod ends up slanted and the piston square.
 
 `kt_bauformen.py` holds the engine knowledge for R2…V12. Crank pin angles and
 firing orders are **tables, not formulas**: there is no consistent rule (an I6
@@ -446,6 +469,26 @@ direction, not the radial distance — the contact point walks sideways.
 The engine and the gearbox share one axis in the standard orientation, so
 `mit_getriebe=True` needs only a translation: the R4 ends at x = 346 and the
 gearbox starts at x = 346.
+
+**A DOHC head has two camshafts per bank, and one chain drives both.** The
+chain path (`kt_steuertrieb._kettenbahn`) therefore runs over any number of
+sprockets: one external tangent between each neighbouring pair plus the wrap
+arc on each wheel, with `_umlauf()` putting them in loop order and
+`_bahnlaenge()` measuring the real path — the two-wheel formula stops being
+true at the third wheel.
+
+Two axis conventions bit here, both silently:
+- The sprocket bores declared axis `-X` like the crank nose they sit on. Two
+  `-X` axes do **not** point at each other, so `andocke()` turned the whole
+  drive 180° about Z and mirrored it in y — at a V engine one bank's chain
+  landed on the other bank. At `kipp = 0` (inline) it never showed.
+- The camshaft tilt is `neigung − bankwinkel`, not the sum. The sum is right
+  for inline engines (bank angle 0) and 90° wrong for V engines, which is why
+  only those showed ~11 % tappet interference.
+
+And a measurement trap: a camshaft's axis is **not** its bounding-box centre —
+the lobes stick out on one side and move it 5.5 mm. Take the drive journal at
+the −x end, which is a plain cylinder on the axis.
 
 ### Fits, and why they matter to the checks
 

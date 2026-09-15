@@ -29,8 +29,10 @@ if not hasattr(FreeCADGui, "SendMsgToActiveView"):
     FreeCADGui.SendMsgToActiveView = lambda *a, **k: None
 
 import kt_bauformen as KB
+import kt_kinematik
 import kt_kolben
 import kt_kurbelwelle
+import kt_kurbeltrieb
 import kt_motor
 import kt_nockenwelle
 import kt_pleuel
@@ -39,6 +41,7 @@ import kt_steuertrieb
 import kt_stoessel
 import kt_ventil
 import kt_ventilfeder
+import kt_ventiltrieb
 
 OUT = os.environ.get("T2G_TEST_OUT", "")
 ZEILEN, FEHLER = [], []
@@ -61,8 +64,11 @@ def pruefe(bedingung, text):
 # --- 1: Selbsttests der Bauteile -----------------------------------------
 log("\n--- Die Bauteile einzeln ---")
 FreeCAD.newDocument("KurbeltriebTest")
-for modul in (KS, KB, kt_kolben, kt_pleuel, kt_kurbelwelle, kt_ventil,
-              kt_ventilfeder, kt_stoessel, kt_nockenwelle, kt_steuertrieb):
+# Ein Skript je Bauteil, darueber die Baugruppen, darueber der Motor. Jede
+# Stufe hat ihren eigenen Selbsttest — geht etwas kaputt, sagt die Stufe, wo.
+for modul in (KS, KB, kt_kinematik, kt_kolben, kt_pleuel, kt_kurbelwelle,
+              kt_ventil, kt_ventilfeder, kt_stoessel, kt_nockenwelle,
+              kt_steuertrieb, kt_kurbeltrieb, kt_ventiltrieb):
     name = modul.__name__
     try:
         log("     " + modul.selbsttest())
