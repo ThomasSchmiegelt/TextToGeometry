@@ -71,6 +71,7 @@ T2G_SKILL = {
          0, 0, 1),
         ("mit_ventiltrieb", "Ventiltrieb bauen (1/0)", "-", 1, 0, 1),
         ("mit_getriebe", "Getriebe anflanschen (1/0)", "-", 0, 0, 1),
+        ("getriebe_gaenge", "Gaenge des Getriebes", "Stk", 5, 1, 8),
     ],
     "dependencies": [],
     # Kein "kollision": ein Motor DARF sich beruehren — Kolben im Zylinder,
@@ -116,7 +117,8 @@ def build(params=None):
         steuertrieb=("zahnrad" if int(p.get("steuertrieb_zahnrad", 0))
                      else "kette"),
         mit_ventiltrieb=bool(int(p.get("mit_ventiltrieb", 1))),
-        mit_getriebe=bool(int(p.get("mit_getriebe", 0))))
+        mit_getriebe=bool(int(p.get("mit_getriebe", 0))),
+        getriebe_gaenge=int(p.get("getriebe_gaenge", 5)))
     return [shape for _label, shape in teile]
 
 

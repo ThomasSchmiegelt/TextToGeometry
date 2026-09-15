@@ -119,7 +119,8 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
          ventilhub=0.0, steuertrieb="kette", zaehne_kurbel=20,
          spreizung=110.0, ventilwinkel=12.0, pleuel_breite=0.0,
          bankwinkel=0.0, v8_kreuzebene=True, mit_ventiltrieb=True,
-         mit_getriebe=False, getriebe_gaenge=5, doc=None):
+         mit_getriebe=False, getriebe_gaenge=5, getriebe_welle_d=0.0,
+         getriebe_modul=0.0, getriebe_zaehne_summe=48, doc=None):
     """Ein vollständiger Motor als Liste von (Bezeichnung, Shape).
 
     bauform             R2 … V12
@@ -150,7 +151,11 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
     mit_ventiltrieb     False baut nur Kurbelwelle, Pleuel und Kolben
     mit_getriebe        True flanscht das Getriebe aus getriebe_fcgear an
                         den Schwungradflansch — beide laufen in der
-                        Normallage entlang X auf derselben Achse
+                        Normallage entlang X auf derselben Achse. Seine
+                        Maße wachsen mit dem Hubraum (siehe
+                        ``getriebe_auslegung``); getriebe_welle_d,
+                        getriebe_modul und getriebe_zaehne_summe
+                        überschreiben sie.
     """
     k = kennwerte(bauform, bohrung, hub, stichmass, kompressionshoehe,
                   zylinderabstand, ventile_je_zylinder, v8_kreuzebene,
@@ -221,23 +226,79 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
         k.update(vt_kenn)
 
     if mit_getriebe:
-        teile.extend(_getriebe_anflanschen(kw.punkt("abtrieb"), k, doc,
-                                           getriebe_gaenge))
+        teile.extend(_getriebe_anflanschen(
+            kw.punkt("abtrieb"), k, doc, getriebe_gaenge,
+            getriebe_welle_d, getriebe_modul, getriebe_zaehne_summe))
     return teile, k, proben
 
 
-def _getriebe_anflanschen(abtrieb, k, doc, gaenge=5):
+#: Normmodule nach DIN 780, Reihe 1. Ein Getriebe wird nicht mit Modul
+#: 2,87 gebaut.
+MODULE = (1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0)
+
+#: Bezugspunkt der Getriebeauslegung: ein 2,0-Liter-Motor bekommt eine
+#: 20-mm-Eingangswelle. Daran haengt alles Weitere.
+BEZUG_HUBRAUM = 2000.0
+BEZUG_WELLE = 20.0
+
+
+def getriebe_auslegung(hubraum_cm3, welle_d=0.0, modul=0.0, zaehne_summe=48):
+    """Die Maße des Getriebes, passend zum Motor.
+
+    Das Getriebe hat bisher feste 20 mm Welle und Modul 2 bekommen, gleich
+    ob davor ein Zweiliter-Vierzylinder oder ein Sechsliter-V12 stand. Das
+    ist keine Auslegung, sondern ein Zufall.
+
+    Was ein Getriebe wirklich bestimmt, ist das **Drehmoment**, und das geht
+    im ersten Zugriff mit dem Hubraum. Eine Welle auf Torsion ausgelegt
+    braucht ``d ∝ T^(1/3)``, also:
+
+        d = 20 mm · (V_H / 2000 cm³)^(1/3)
+
+    Ein Sechsliter bekommt damit 20 · 3^(1/3) = 28,8 mm statt 20. Der
+    **Modul** folgt der Welle (rund ein Zehntel) und wird auf die Normreihe
+    DIN 780 gerundet; die **Zahnbreite** ist das Sechsfache des Moduls.
+
+    Das ist eine Faustformel und wird auch so genannt: sie ersetzt keine
+    Zahnfußrechnung. Sie sorgt dafür, dass ein großer Motor kein
+    Spielzeuggetriebe bekommt.
+    """
+    v = max(1.0, float(hubraum_cm3))
+    d = float(welle_d) or round(BEZUG_WELLE * (v / BEZUG_HUBRAUM) ** (1.0 / 3.0), 1)
+    m = float(modul)
+    if not m:
+        roh = d / 10.0
+        m = min(MODULE, key=lambda x: abs(x - roh))
+    breite = round(6.0 * m, 1)
+    return {
+        "welle_d": d,
+        "modul": m,
+        "breite": breite,
+        "zaehne_summe": int(zaehne_summe),
+        "achsabstand": round(m * int(zaehne_summe) / 2.0, 2),
+        "hubraum_cm3": round(v, 1),
+    }
+
+
+def _getriebe_anflanschen(abtrieb, k, doc, gaenge=5, welle_d=0.0, modul=0.0,
+                          zaehne_summe=48):
     """Das Getriebe aus Tools/getriebe_fcgear.py hinter den Motor setzen.
 
     Beide laufen in der Normallage entlang X mit der Welle auf y = z = 0 —
     es genuegt also eine Verschiebung. Der Anschluss ist der
     Schwungradflansch der Kurbelwelle; dort beginnt die Eingangswelle des
     Getriebes.
+
+    Die Maße kommen aus ``getriebe_auslegung()`` und wachsen mit dem
+    Hubraum; was hier gesetzt wird, ueberschreibt sie.
     """
     import getriebe_fcgear as GF
 
-    welle_d = 20.0
-    teile = GF.baue(gaenge=int(gaenge), welle_d=welle_d, doc=doc)
+    g = getriebe_auslegung(k.get("hubraum_cm3", BEZUG_HUBRAUM), welle_d,
+                           modul, zaehne_summe)
+    teile = GF.baue(gaenge=int(gaenge), welle_d=g["welle_d"],
+                    modul=g["modul"], breite=g["breite"],
+                    zaehne_summe=g["zaehne_summe"], doc=doc)
     # Wo faengt die Eingangswelle des Getriebes in seinem eigenen Bild an?
     wellen = [s for n, s in teile if "welle" in n.lower()]
     if not wellen:
@@ -249,8 +310,10 @@ def _getriebe_anflanschen(abtrieb, k, doc, gaenge=5):
         kopie = shp.copy()
         kopie.translate(versatz)
         aus.append(("Getriebe: " + label, kopie))
-    k["getriebe"] = {"gaenge": int(gaenge), "teile": len(aus),
-                     "anschluss_x": round(abtrieb.ort.x, 2)}
+    g.update({"gaenge": int(gaenge), "teile": len(aus),
+              "anschluss_x": round(abtrieb.ort.x, 2),
+              "flansch_d": round(abtrieb.mass, 1)})
+    k["getriebe"] = g
     return aus
 
 
@@ -365,6 +428,21 @@ def pruefe(teile=None, proben=None, kenn=None, toleranz=0.02, **kw):
             sag(gleich and abs(versatz[0] - kenn["bankversatz"]) < 0.5,
                 "Bankversatz %s mm (erwartet %.1f)"
                 % (sorted(set(versatz)), kenn["bankversatz"]))
+
+    # Das Getriebe muss zum Motor PASSEN, nicht nur an ihm haengen: seine
+    # Eingangswelle folgt dem Drehmoment, und das geht mit dem Hubraum.
+    if kenn and kenn.get("getriebe"):
+        g = kenn["getriebe"]
+        soll = getriebe_auslegung(kenn.get("hubraum_cm3", BEZUG_HUBRAUM))
+        sag(abs(g["welle_d"] - soll["welle_d"]) < 0.15 or
+            g["welle_d"] >= soll["welle_d"],
+            "Getriebewelle %.1f mm zu %.1f cm^3 Hubraum (Vorschlag %.1f)"
+            % (g["welle_d"], kenn.get("hubraum_cm3", 0.0), soll["welle_d"]))
+        sag(g["modul"] in MODULE,
+            "Modul %.2f ist ein Normmodul (DIN 780)" % g["modul"])
+        sag(g["welle_d"] < g["flansch_d"],
+            "die Getriebewelle (%.1f) passt in den Schwungradflansch (%.1f)"
+            % (g["welle_d"], g["flansch_d"]))
 
     # Kolben und Pleuel: je Zylinder eines.
     if kenn:

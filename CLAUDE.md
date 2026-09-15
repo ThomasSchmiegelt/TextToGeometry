@@ -591,8 +591,19 @@ the lift is the largest projection of the lobe profile onto the follower
 direction, not the radial distance — the contact point walks sideways.
 
 The engine and the gearbox share one axis in the standard orientation, so
-`mit_getriebe=True` needs only a translation: the R4 ends at x = 346 and the
-gearbox starts at x = 346.
+`mit_getriebe=True` needs only a translation: the R4 ends at x = 400 and the
+gearbox starts at x = 400.
+
+**The gearbox is sized from the engine, not fixed.** It used to get a 20 mm
+input shaft and module 2 whatever stood in front of it — a coincidence at two
+litres and wrong everywhere else. What sizes a gearbox is torque, and torque
+goes with displacement, so a shaft designed for torsion needs
+`d ∝ T^(1/3)`: `getriebe_auslegung()` takes `20 mm · (V_H / 2000 cm³)^(1/3)`,
+puts the module at a tenth of that rounded to DIN 780, and the face width at
+six modules. A 6-litre V12 therefore gets 28.8 mm and module 3 where a
+2-litre R4 keeps 20 mm and module 2. It is a rule of thumb and says so — it
+replaces no tooth-root calculation, it only stops a big engine getting a toy
+gearbox.
 
 **A DOHC head has two camshafts per bank, and one chain drives both.** The
 chain path (`kt_steuertrieb._kettenbahn`) therefore runs over any number of
