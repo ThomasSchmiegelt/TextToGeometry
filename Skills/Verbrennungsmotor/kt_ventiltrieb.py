@@ -408,7 +408,10 @@ def selbsttest(bauform="V8"):
         pleuel_auge_b=a["pleuel_auge_b"], steuertrieb_d=a["steuertrieb_d"],
         wange_t=a["wange_t"], hauptlager_b=a["hauptlager_b"],
         kolben_schafthoehe=a["kolben_schafthoehe"],
-        kolben_boden_t=a["kolben_boden_t"])
+        kolben_boden_t=a["kolben_boden_t"],
+        kolben_feuersteg=a["kolben_feuersteg"],
+        kolben_ringsteg=a["kolben_ringsteg"],
+        kolben_desachsierung=a["kolben_desachsierung"])
     teile, proben, kenn = baue(bauform=bauform, blockhoehe=a["blockhoehe"],
                                zylinder_x=zylinder_x,
                                zylinderabstand=a["zylinderabstand"],

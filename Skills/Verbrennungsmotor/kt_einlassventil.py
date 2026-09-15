@@ -36,6 +36,9 @@ ANTEIL = {2: 0.45, 4: 0.36}
 #: kleiner, sein Schaft aber dicker.
 SCHAFT_ANTEIL = 0.070
 
+#: Tragende Breite der Sitzflaeche [mm]. Der Einlass sitzt schmaler — er ist das kuehlere Ventil.
+SITZBREITE = 1.5
+
 
 def vorschlag(bohrung=86.0, ventile_je_zylinder=4):
     """Üblicher Tellerdurchmesser [mm]."""
@@ -68,6 +71,7 @@ def baue(bohrung=86.0, ventile_je_zylinder=4, teller_d=0.0, schaft_d=0.0,
     d = float(teller_d) or vorschlag(bohrung, ventile_je_zylinder)
     s = float(schaft_d) or schaftvorschlag(bohrung)
     t = kt_ventil.baue(teller_d=d, schaft_d=s, laenge=float(laenge),
+                       sitzbreite=SITZBREITE,
                        kegel_form=1.0, hohl_d=0.0, name=name)
     t.kennwerte["art"] = "einlass"
     t.kennwerte["hohl"] = False
@@ -109,7 +113,20 @@ def selbsttest():
         raise AssertionError("das Einlassventil hat einen Hohlraum (%d "
                              "Schalen)" % len(shp.Shells))
 
+    # Sitzbreite und Tellerrand nach den Richtwerten.
+    if abs(t.kennwerte["sitzbreite"] - SITZBREITE) > 1e-9:
+        raise AssertionError("die Sitzbreite steht nicht in den Kennwerten")
+    rand = t.kennwerte["tellerrand_h"] / d
+    if not 0.04 <= rand <= 0.06:
+        raise AssertionError("Tellerrand %.3f x Teller, Soll 0,04…0,06"
+                             % rand)
+    if not t.kennwerte["sitz_d"] < d:
+        raise AssertionError("der Sitzdurchmesser muss unter dem Teller "
+                             "liegen")
+
     for pflicht in ("sitz", "schaft", "schaft_ende"):
         t.punkt(pflicht)
     return ("Einlassventil-Selbsttest bestanden (Teller %.1f, Schaft %.1f, "
-            "voll, %.0f mm^3)" % (d, s, shp.Volume))
+            "Sitz %.1f auf %.1f mm Breite, Rand %.2f mm, voll, %.0f mm^3)"
+            % (d, s, t.kennwerte["sitz_d"], t.kennwerte["sitzbreite"],
+               t.kennwerte["tellerrand_h"], shp.Volume))

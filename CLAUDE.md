@@ -503,6 +503,56 @@ places computing one dimension differently, invisible at the default size:
   own pocket (3.7 %).
 - **One tappet pattern for two stem diameters** — see above.
 
+### Design research, and what it changed
+
+`Skills/Verbrennungsmotor/Gestaltung/*.md` holds one file per part: what
+determines its shape, the published design ratios with their sources, what
+the generator does today, and what is still open. The numbers are not
+invented — the piston table is MAHLE's *Kolben-Gestaltungsrichtlinien*, the
+con-rod I-section is the classic `B = 4t, H = 5t`, the crankpin overlap is
+`(main Ø + pin Ø − stroke)/2`, the sprocket pitch circle is `p/sin(π/z)`
+checked against a DIN 8187 catalogue value.
+
+Reading them against the code found four dimensions that were simply wrong
+at any bore, not just at the extremes:
+
+- The piston's **overall length** was 0.93·D — Diesel territory. A four-stroke
+  Otto piston is 0.6–0.7; it is now 0.652. The old value is what made the
+  crank web graze the skirt at 70 mm bore.
+- **Fire land** was the same value as the crown thickness, and the **first
+  ring land** was twice the groove height (0.023·D against a required
+  0.040–0.055). Both are now their own dimensions.
+- The **small rod eye** was `0.75 · rod width`, which put the piston's boss
+  spacing at 0.198·D, just under the 0.20 minimum. It is now measured
+  against the bore like everything else.
+- The **tappet diameter** came from a ratio to the bore. It actually follows
+  from the cam: on a flat follower the contact point walks by `max|dh/dφ|`,
+  so the bucket needs `2·` that. For the cosine lobe this is
+  `lift·π/(2·flank)` in closed form — 15.0 mm at 10 mm lift and a 60° flank,
+  so a 30 mm minimum bucket. `kt_nockenwelle.auswanderung()` computes it
+  numerically and the selftest checks it against the closed form.
+
+**Pin offset (Desachsierung) only works together with the kinematics.** The
+pin sits off-centre in the piston, so it has to sit off the cylinder axis by
+the same amount for the piston itself to run on that axis.
+`kt_kinematik.pleuelrichtung()` therefore takes a support point for the line.
+Without it the whole piston walked off the bank axis (measured −128.0 | 129.1
+instead of |y| = |z|).
+
+**A measured limit, not a bug**: at a 120° bank angle the cylinder axis is
+60° off vertical and the inlet valve another 12° inward, so its head sits
+96 mm beside the piston centre and dips into the piston *rim* — 25.8 %, and
+no valve pocket can cover that. Same for a V10 at 90° (its table value is
+72°). Every production bank angle is clean. Flipping the pocket tilt was
+tried and made the 28° case worse, so the sign is right; this is the layout,
+not the construction.
+
+`Beispiele/motoren_bauen.py` builds all 66 variants and saves each as its own
+`.FCStd` named after its design (`V8_86x86_4V_kette_bank90.FCStd`), with a
+report next to them. It runs at import time and writes its report to a file,
+because FreeCADCmd neither guarantees `__name__ == "__main__"` nor shows
+stdout — with a guard around it, nothing happened and nothing said why.
+
 The point of the whole thing is `kt_schnittstelle.py`: every part returns its
 bodies **and** its connection points (position, axis, kind, size), and the
 assembly docks them instead of computing coordinates. `andocke()` moves bodies

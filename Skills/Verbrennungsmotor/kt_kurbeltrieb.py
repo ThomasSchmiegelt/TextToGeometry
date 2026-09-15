@@ -54,7 +54,8 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=150.5,
          hubzapfen_d=48.0, hauptlager_d=54.0, pleuel_breite=22.0,
          pleuel_auge_b=0.0, steuertrieb_d=30.0, bankwinkel=0.0,
          wange_t=0.0, hauptlager_b=0.0, kolben_schafthoehe=0.0,
-         kolben_boden_t=0.0,
+         kolben_boden_t=0.0, kolben_feuersteg=0.0, kolben_ringsteg=0.0,
+         kolben_desachsierung=0.0,
          v8_kreuzebene=True, ventiltaschen=None):
     """Kurbelwelle, Pleuel und Kolben.
 
@@ -93,16 +94,36 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=150.5,
     # Einmal gebaut und dann kopiert: eine Ventilfeder zu bauen dauert
     # Sekunden, und ein V12 mit vier Ventilen braeuchte achtundvierzig.
     auge_b = float(pleuel_auge_b) or round(pleuel_b * 0.75, 2)
-    kolben_muster = kt_kolben.baue(bohrung=bohrung,
-                                   kompressionshoehe=kompressionshoehe,
-                                   bolzen_d=bolzen_d,
-                                   pleuel_b=round(auge_b + 0.5, 2),
-                                   schafthoehe=float(kolben_schafthoehe)
-                                   or 48.0,
-                                   boden_t=float(kolben_boden_t) or 7.0,
-                                   ventiltaschen=list(ventiltaschen or []))
+    desachsierung = float(kolben_desachsierung)
+
+    def kolben_mit(taschen):
+        return kt_kolben.baue(bohrung=bohrung,
+                              kompressionshoehe=kompressionshoehe,
+                              bolzen_d=bolzen_d,
+                              pleuel_b=round(auge_b + 0.5, 2),
+                              schafthoehe=float(kolben_schafthoehe) or 48.0,
+                              boden_t=float(kolben_boden_t) or 7.0,
+                              feuersteg=float(kolben_feuersteg),
+                              ringsteg=float(kolben_ringsteg),
+                              desachsierung=float(kolben_desachsierung),
+                              ventiltaschen=list(taschen or []))
+
+    taschen = list(ventiltaschen or [])
+    kolben_muster = kolben_mit(taschen)
+    # Die Ventiltaschen sind um den Ventilwinkel GEKIPPT, und die Kipprichtung
+    # haengt daran, wohin die lokale X-Richtung des Kolbens faellt. Das ist
+    # nicht vorherzusagen — bei einem V8 mit 120 Grad Bankwinkel schlug es
+    # zwischen den Baenken um, und die Tasche kippte zur falschen Seite
+    # (25,8 % Durchdringung mit dem Einlassventil). Deshalb gibt es ein
+    # zweites Muster mit umgekehrter Kippung, und je Zylinder wird gemessen,
+    # welches passt.
+    gekippt = any(len(t) > 4 and abs(float(t[4])) > 1e-9 for t in taschen)
+    kolben_gespiegelt = kolben_mit(
+        [(t[0], t[1], t[2], t[3], -float(t[4])) if len(t) > 4 else t
+         for t in taschen]) if gekippt else kolben_muster
     pleuel_muster = kt_pleuel.baue(stichmass=l, hubzapfen_d=hubzapfen_d,
-                                   bolzen_d=bolzen_d, breite=pleuel_b)
+                                   bolzen_d=bolzen_d, breite=pleuel_b,
+                                   klein_b=auge_b)
 
     lagen = B.zylinderlagen(bauform, zylinderabstand, v8_kreuzebene,
                             bankwinkel)
@@ -129,8 +150,17 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=150.5,
         # eines V8 auf (-100,8|143,8), (-143,8|100,8), (-57,8|100,8) statt
         # auf der Bankachse.
         richtung = K.zylinderachse(bankwinkel)
+        # Desachsierung: der Bolzen sitzt im Kolben aussermittig, also muss
+        # er um denselben Betrag NEBEN der Zylinderachse liegen, damit der
+        # Kolben selbst auf ihr laeuft. Die Richtung des Versatzes ist quer
+        # zur Bolzenachse, also in der Bankebene.
+        quer = Vector(1, 0, 0).cross(richtung)
+        if quer.Length < 1e-9:
+            quer = Vector(0, 1, 0)
+        quer.normalize()
+        stuetz = Vector(quer).multiply(float(desachsierung))
         pleuel = S.richte(pleuel_muster, "hubzapfen", "kolbenbolzen", ziel,
-                          K.pleuelrichtung(ziel.ort, richtung, l))
+                          K.pleuelrichtung(ziel.ort, richtung, l, stuetz))
         teile.extend([("Pleuel %d" % nr, s) for _n, s in pleuel.koerper])
         proben.append((pleuel.punkt("hubzapfen"), ziel))
 
@@ -141,6 +171,15 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=150.5,
         # Pleuel ausgerichtet: sein Boden zeigt die Zylinderachse entlang.
         kolben = S.richte(kolben_muster, "bolzen", "boden",
                           pleuel.punkt("kolbenbolzen"), richtung)
+        if gekippt:
+            # Wohin ist die lokale +X-Richtung gefallen? Zeigt sie gegen
+            # `quer`, kippen die Taschen verkehrt herum, und das gespiegelte
+            # Muster ist das richtige.
+            marke = Vector(kolben.punkt("quermarke").ort).sub(
+                Vector(kolben.punkt("bolzen").ort))
+            if marke.dot(quer) < 0.0:
+                kolben = S.richte(kolben_gespiegelt, "bolzen", "boden",
+                                  pleuel.punkt("kolbenbolzen"), richtung)
         teile.extend([("Kolben %d" % nr, s) for _n, s in kolben.koerper])
         proben.append((kolben.punkt("bolzen"), pleuel.punkt("kolbenbolzen")))
         zylinder_x[nr] = kolben.punkt("bolzen").ort.x
@@ -169,7 +208,10 @@ def selbsttest(bauform="V8"):
         steuertrieb_d=aus["steuertrieb_d"], wange_t=aus["wange_t"],
         hauptlager_b=aus["hauptlager_b"],
         kolben_schafthoehe=aus["kolben_schafthoehe"],
-        kolben_boden_t=aus["kolben_boden_t"])
+        kolben_boden_t=aus["kolben_boden_t"],
+        kolben_feuersteg=aus["kolben_feuersteg"],
+        kolben_ringsteg=aus["kolben_ringsteg"],
+        kolben_desachsierung=aus["kolben_desachsierung"])
     z, bank = B.daten(bauform)
     if len(zylinder_x) != z:
         raise AssertionError("%d Zylinder statt %d" % (len(zylinder_x), z))

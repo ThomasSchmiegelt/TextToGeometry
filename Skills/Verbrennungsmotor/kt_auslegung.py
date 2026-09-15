@@ -52,8 +52,30 @@ VERHAELTNISSE = {
     "stoessel_d": 0.384,          # x Bohrung
     "wange_t": 0.209,             # x Bohrung; Dicke einer Kurbelwange
     "hauptlager_b": 0.302,        # x Bohrung; Breite eines Hauptlagers
-    "kolben_schafthoehe": 0.558,  # x Bohrung; Bolzenmitte bis Schaftende
-    "kolben_boden_t": 0.081,      # x Bohrung; Dicke des Kolbenbodens
+    # Kolben nach MAHLE, Kolben-Gestaltungsrichtlinien, Tabelle 2.1
+    # (Viertakt-Ottomotor Pkw). Siehe Gestaltung/kolben.md.
+    "kolben_schafthoehe": 0.28,   # x Bohrung; Bolzenmitte bis Schaftende
+    "kolben_boden_t": 0.081,      # x Bohrung; Bodendicke, Soll 0,06…0,10
+    "kolben_feuersteg": 0.06,     # x Bohrung; Soll 0,04…0,10 (Otto)
+    "kolben_ringsteg": 0.045,     # x Bohrung; 1. Ringsteg, Soll 0,040…0,055
+    "kolben_desachsierung": 0.01,  # x Bohrung; Versatz der Bolzenachse
+    # Breite des kleinen Pleuelauges. An der BOHRUNG gemessen, nicht an der
+    # Pleuelbreite: sie bestimmt den Nabenabstand im Kolben, und dafuer gibt
+    # es einen Richtwert (NA/D = 0,20…0,35). Mit 0,75 x Pleuelbreite lag er
+    # bei 0,198 und damit knapp darunter.
+    "pleuel_auge_b": 0.235,       # x Bohrung
+}
+
+#: Grenzen aus der Literatur, die ``pruefe()`` nachmisst: Name -> (min, max)
+#: als Anteil der Bohrung. Alles hier ist belegt, nichts geschaetzt.
+GRENZEN = {
+    "kolben_gesamtlaenge": (0.60, 0.70),   # GL/D, Otto 4-Takt Pkw
+    "kompressionshoehe": (0.30, 0.45),     # KH/D
+    "kolbenbolzen_d": (0.20, 0.26),        # BO/D
+    "kolben_boden_t": (0.06, 0.10),        # s/D
+    "kolben_feuersteg": (0.04, 0.10),      # Otto
+    "kolben_ringsteg": (0.040, 0.055),     # 1. Ringsteg St/D
+    "nabenabstand": (0.20, 0.35),          # NA/D
 }
 
 #: Maße, die zwei Bauteile teilen: (Maß, wer es braucht). Genau diese Paare
@@ -89,6 +111,7 @@ def auslegen(bohrung=86.0, hub=86.0, bauform="R4", ventile_je_zylinder=4,
     """
     import kt_auslassventil
     import kt_einlassventil
+    import kt_nockenwelle
 
     d = float(bohrung)
     s = float(hub)
@@ -127,14 +150,17 @@ def auslegen(bohrung=86.0, hub=86.0, bauform="R4", ventile_je_zylinder=4,
         "hauptlager_b": w("hauptlager_b"),
         "kolben_schafthoehe": w("kolben_schafthoehe"),
         "kolben_boden_t": w("kolben_boden_t"),
+        "kolben_feuersteg": w("kolben_feuersteg"),
+        "kolben_ringsteg": w("kolben_ringsteg"),
+        "kolben_desachsierung": w("kolben_desachsierung"),
     }
 
     # --- Abgeleitetes, das aus der Tabelle selbst folgt -------------------
-    # Das kleine Pleuelauge ist 0,75 der Pleuelbreite (so baut kt_pleuel),
-    # und GENAU dafuer muss der Kolben seinen Schlitz frei lassen. Vorher
-    # stand im Kolben fest 17 mm und im Pleuel 22*0,75 = 16,5 — bei 86 mm
-    # Bohrung passte das zufaellig, bei einer breiteren Pleuelstange nicht.
-    a["pleuel_auge_b"] = round(a["pleuel_breite"] * 0.75, 2)
+    # Das kleine Pleuelauge und der Schlitz zwischen den Bolzennaben des
+    # Kolbens sind DASSELBE Mass. Vorher stand im Kolben fest 17 mm und im
+    # Pleuel 0,75 x Breite = 16,5 — bei 86 mm Bohrung passte das zufaellig,
+    # bei einer breiteren Pleuelstange nicht.
+    a["pleuel_auge_b"] = w("pleuel_auge_b")
     # Beim V-Motor teilen sich zwei Pleuel einen Zapfen, beim Reihenmotor
     # traegt er eines. Fest 26 mm stand hier frueher fuer den Reihenmotor —
     # bei 120 mm Bohrung ist das Pleuel aber 30,7 mm breit und haette
@@ -154,6 +180,14 @@ def auslegen(bohrung=86.0, hub=86.0, bauform="R4", ventile_je_zylinder=4,
     a["zylinderabstand"] = round(max(a["zylinderabstand"],
                                      a["kurbel_mindestteilung"],
                                      a["zylinder_mindestabstand"]), 2)
+    a["kolben_gesamtlaenge"] = round(a["kompressionshoehe"]
+                                     + a["kolben_schafthoehe"], 2)
+    # Zapfenueberdeckung: wie weit Hubzapfen und Hauptlagerzapfen einander
+    # axial gesehen ueberdecken. Positiv heisst, dass Material des einen in
+    # Material des anderen uebergeht — daran haengt die Steifigkeit der
+    # ganzen Welle (Contemporary Crankshaft Design).
+    a["zapfenueberdeckung"] = round((a["hauptlager_d"] + a["hubzapfen_d"]
+                                     - a["hub"]) / 2.0, 2)
     a["blockhoehe"] = round(a["kurbelradius"] + a["stichmass"]
                             + a["kompressionshoehe"], 2)
     a["lambda"] = round(a["kurbelradius"] / a["stichmass"], 4)
@@ -167,6 +201,15 @@ def auslegen(bohrung=86.0, hub=86.0, bauform="R4", ventile_je_zylinder=4,
     # Der Stoessel muss den Ventilschaft aufnehmen und unter den Nocken
     # passen — er richtet sich nach dem dickeren der beiden Schaefte.
     a["ventil_schaft_d"] = max(a["einlass_schaft_d"], a["auslass_schaft_d"])
+    # Der Tassendurchmesser folgt NICHT aus der Bohrung, sondern aus dem
+    # Nocken: beim Flachstoessel wandert der Beruehrpunkt um dh/dphi zur
+    # Seite, und die Tasse muss zweimal so breit sein. Bei 10 mm Hub und
+    # 60 Grad Flanke sind das 15 mm Auswanderung und 30 mm Mindesttasse.
+    a["nocken_auswanderung"] = kt_nockenwelle.auswanderung(
+        a["nocken_grundkreis_d"] / 2.0, a["ventilhub"])
+    a["stoessel_mindest_d"] = round(2.0 * a["nocken_auswanderung"], 2)
+    a["stoessel_d"] = round(max(a["stoessel_d"],
+                                a["stoessel_mindest_d"] + 0.06 * d), 2)
 
     for k in ueberschreiben:
         if k not in a:
@@ -230,6 +273,10 @@ def pruefe(a):
     sag(breit < a["bohrung"] * 1.02,
         "%d Ventile je Seite (%.1f mm) passen in die Bohrung (%.1f)"
         % (je_seite, breit, a["bohrung"]))
+    sag(a.get("stoessel_mindest_d", 0.0) <= a["stoessel_d"],
+        "die Tasse (%.1f) traegt die Auswanderung des Nockens (%.1f mm, "
+        "braucht %.1f)" % (a["stoessel_d"], a.get("nocken_auswanderung", 0.0),
+                           a.get("stoessel_mindest_d", 0.0)))
     sag(a["stoessel_d"] > a["ventil_schaft_d"] * 2.0,
         "der Stoessel (%.1f) nimmt den Ventilschaft (%.1f) auf"
         % (a["stoessel_d"], a["ventil_schaft_d"]))
@@ -245,6 +292,23 @@ def pruefe(a):
     sag(kolben_unten > wange_r,
         "die Kurbelwange (r %.1f) bleibt unter dem Kolbenschaft (%.1f)"
         % (wange_r, kolben_unten))
+    # Die Grenzen der Literatur, Mass fuer Mass (siehe GRENZEN).
+    schief = []
+    for name, (lo, hi) in sorted(GRENZEN.items()):
+        wert = a.get(name)
+        if name == "nabenabstand":
+            wert = a.get("pleuel_auge_b", 0.0) + 0.5
+        if not wert:
+            continue
+        anteil = wert / a["bohrung"]
+        if not lo - 1e-9 <= anteil <= hi + 1e-9:
+            schief.append("%s %.3f (Soll %.2f…%.2f)" % (name, anteil, lo, hi))
+    sag(not schief,
+        "alle %d Kolbenmasse liegen in den Richtwerten%s"
+        % (len(GRENZEN), "" if not schief else ": " + "; ".join(schief)))
+    sag(a["zapfenueberdeckung"] > 0.0,
+        "Zapfenueberdeckung %.1f mm (muss positiv sein, sonst haengt der "
+        "Hubzapfen allein an der Wange)" % a["zapfenueberdeckung"])
     sag(a["einlass_teller_d"] > a["auslass_teller_d"],
         "der Einlassteller (%.1f) ist groesser als der Auslassteller (%.1f)"
         % (a["einlass_teller_d"], a["auslass_teller_d"]))
@@ -259,6 +323,13 @@ def selbsttest():
     # Bei 86 mm muss genau herauskommen, womit dieser Generator vermessen
     # wurde — sonst waere die Umstellung eine stille Aenderung.
     a = auslegen(bohrung=86.0, hub=86.0, bauform="R4")
+    # Die Gesamtlaenge des Kolbens gehoert beim Viertakt-Ottomotor auf
+    # 0,6…0,7 x Bohrung. Mit dem frueheren Schaft von 0,558 x D kam 0,93
+    # heraus — das ist Dieselmass, und es kostete bei kleiner Bohrung die
+    # Freiheit der Kurbelwange.
+    if not 0.60 <= a["kolben_gesamtlaenge"] / 86.0 <= 0.70:
+        raise AssertionError("Kolbengesamtlaenge %.3f x D, Soll 0,60…0,70"
+                             % (a["kolben_gesamtlaenge"] / 86.0))
     soll = {"stichmass": 150.5, "zylinderabstand": 101.5,
             "kompressionshoehe": 32.0, "kolbenbolzen_d": 22.0,
             "hubzapfen_d": 48.0, "hauptlager_d": 54.0,
@@ -290,9 +361,17 @@ def selbsttest():
 
     # Ueberschreiben: das Abhaengige muss folgen, nicht widersprechen.
     breit = auslegen(bohrung=86.0, hub=86.0, bauform="V8", pleuel_breite=30.0)
-    if abs(breit["pleuel_auge_b"] - 22.5) > 0.01:
-        raise AssertionError("das kleine Auge folgt der Pleuelbreite nicht "
-                             "(%.2f statt 22,5)" % breit["pleuel_auge_b"])
+    # Das kleine Auge haengt an der BOHRUNG (Nabenabstand im Kolben), nicht
+    # an der Pleuelbreite — es bleibt also stehen, wenn die Stange breiter
+    # wird. Ueberschreiben laesst es sich trotzdem.
+    if abs(breit["pleuel_auge_b"] - a["pleuel_auge_b"]) > 0.01:
+        raise AssertionError("das kleine Auge folgt der Bohrung nicht "
+                             "(%.2f statt %.2f)"
+                             % (breit["pleuel_auge_b"], a["pleuel_auge_b"]))
+    eigen = auslegen(bohrung=86.0, hub=86.0, bauform="R4",
+                     pleuel_auge_b=19.0)
+    if abs(eigen["pleuel_auge_b"] - 19.0) > 1e-9:
+        raise AssertionError("das kleine Auge laesst sich nicht setzen")
     if abs(breit["hubzapfen_b"] - 64.0) > 0.01:
         raise AssertionError("die Zapfenbreite folgt der Pleuelbreite nicht "
                              "(%.2f statt 64)" % breit["hubzapfen_b"])

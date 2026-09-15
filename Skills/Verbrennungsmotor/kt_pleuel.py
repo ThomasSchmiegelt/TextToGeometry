@@ -43,14 +43,19 @@ def kennwerte(stichmass=150.0, hub=86.0, **_rest):
 
 
 def baue(stichmass=150.0, hubzapfen_d=48.0, bolzen_d=22.0, breite=22.0,
-         schaft_b=16.0, schaft_t=12.0, auge_wand=7.0, klein_wand=5.0,
-         spiel=0.06, name="Pleuel"):
+         klein_b=0.0, schaft_b=16.0, schaft_t=12.0, auge_wand=7.0,
+         klein_wand=5.0, spiel=0.06, name="Pleuel"):
     """Ein Pleuel als :class:`Bauteil`.
 
     stichmass     Abstand der Augenmitten [mm]
     hubzapfen_d   Bohrung des großen Auges [mm]
     bolzen_d      Bohrung des kleinen Auges [mm]
     breite        Breite des großen Auges [mm]
+    klein_b       Breite des kleinen Auges [mm]; 0 = 0,75 · breite. Dieses
+                  Maß bestimmt zugleich den **Nabenabstand im Kolben** —
+                  zwischen den Bolzennaben muss genau dafür Platz sein. Die
+                  Richtwerte verlangen NA = 0,20…0,35 · Bohrung, und mit
+                  0,75 · breite lag es bei 0,198 und damit knapp darunter.
     schaft_b      Breite des Schafts [mm]   schaft_t  Dicke des Schafts [mm]
     auge_wand     Wandstärke am großen Auge [mm]
     klein_wand    Wandstärke am kleinen Auge [mm]
@@ -72,8 +77,13 @@ def baue(stichmass=150.0, hubzapfen_d=48.0, bolzen_d=22.0, breite=22.0,
                               Vector(0, 1, 0))
         return k
 
+    kb = float(klein_b) or float(breite) * 0.75
+    if kb > float(breite):
+        raise ValueError(
+            "Das kleine Auge (%.1f) darf nicht breiter sein als das grosse "
+            "(%.1f)." % (kb, float(breite)))
     gross = scheibe(r_gross, float(breite), 0.0)
-    klein = scheibe(r_klein, float(breite) * 0.75, l)
+    klein = scheibe(r_klein, kb, l)
 
     # Schaft: ein Quader zwischen den Augen, als I-Profil angedeutet.
     schaft = Part.makeBox(float(schaft_t), float(schaft_b), l,
@@ -104,7 +114,7 @@ def baue(stichmass=150.0, hubzapfen_d=48.0, bolzen_d=22.0, breite=22.0,
             Punkt("kolbenbolzen", (0, 0, l), (0, 1, 0), "bohrung",
                   float(bolzen_d), "kleines Auge – nimmt den Kolbenbolzen auf"),
         ],
-        kennwerte=kennwerte(l))
+        kennwerte=dict(kennwerte(l), breite=float(breite), klein_b=kb))
 
 
 def selbsttest():

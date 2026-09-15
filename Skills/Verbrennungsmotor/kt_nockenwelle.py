@@ -63,12 +63,53 @@ def nockenkontur(grundkreis_r, hub, breite, winkel_grad, flanke=60.0,
     return flaeche.extrude(Vector(float(breite), 0, 0))
 
 
+def auswanderung(grundkreis_r, hub, flanke=60.0, schritte=720):
+    """Seitliche Auswanderung des Berührpunkts auf einem FLACHSTÖSSEL [mm].
+
+    Während der Nocken abrollt, wandert der Berührpunkt auf dem Tassenboden
+    zur Seite. Der Betrag ist die Ableitung der Erhebungskurve nach dem
+    Nockenwinkel im Bogenmaß:
+
+        e(φ) = dh / dφ
+
+    Die Tasse muss mindestens ``2 · max|e|`` breit sein, sonst läuft der
+    Nocken über ihre Kante. Das ist die eigentliche Auslegungsregel des
+    Tassenstößels — und sie folgt aus dem Nockenprofil, nicht aus einer
+    Tabelle.
+
+    Beim hier verwendeten Kosinusprofil
+
+        h(d) = hub · 0,5 · (1 + cos(π·d/fl))     für |d| < fl
+
+    ist die Ableitung geschlossen anzugeben; gerechnet wird sie trotzdem
+    numerisch, damit sie auch stimmt, wenn das Profil einmal ein anderes ist.
+    """
+    h = float(hub)
+    fl = math.radians(float(flanke))
+    n = max(72, int(schritte))
+    groesste = 0.0
+    vorher = None
+    for i in range(n + 1):
+        a = 2.0 * math.pi * i / n
+        d = (a + math.pi) % (2.0 * math.pi) - math.pi
+        r = h * 0.5 * (1.0 + math.cos(math.pi * d / fl)) if abs(d) < fl \
+            else 0.0
+        if vorher is not None:
+            groesste = max(groesste, abs(r - vorher) / (2.0 * math.pi / n))
+        vorher = r
+    return round(groesste, 3)
+
+
 def kennwerte(nocken=4, grundkreis_d=32.0, hub=10.0, **_rest):
     return {
         "nocken": int(nocken),
         "grundkreis_d": float(grundkreis_d),
         "hub": float(hub),
         "kopfkreis_d": float(grundkreis_d) + 2.0 * float(hub),
+        # Woraus der Tassendurchmesser folgt — siehe ``auswanderung``.
+        "auswanderung": auswanderung(float(grundkreis_d) / 2.0, float(hub)),
+        "stoessel_mindest_d": round(
+            2.0 * auswanderung(float(grundkreis_d) / 2.0, float(hub)), 2),
     }
 
 
@@ -203,6 +244,17 @@ def selbsttest():
             raise AssertionError("Nocken %d: Spitze bei r=%.2f statt %.2f"
                                  % (k + 1, radius, rg + h))
 
+    # Auswanderung: fuer das Kosinusprofil ist dh/dd = -hub*pi/(2*fl)
+    # * sin(pi*d/fl), also ist der groesste Betrag hub*pi/(2*fl).
+    fl = math.radians(60.0)
+    erwartet = h * math.pi / (2.0 * fl)
+    gemessen = auswanderung(rg, h, 60.0)
+    if abs(gemessen - erwartet) > 0.05:
+        raise AssertionError("Auswanderung %.3f statt %.3f mm"
+                             % (gemessen, erwartet))
+    if t.kennwerte["stoessel_mindest_d"] < 2.0 * gemessen - 0.05:
+        raise AssertionError("der Mindestdurchmesser der Tasse ist zu klein")
+
     # Halbe Drehzahl: aus 180 Grad Kurbelwinkel werden 90 Grad Nockenwinkel.
     if nockenwinkel([0.0, 180.0, 360.0, 540.0]) != [0.0, 90.0, 180.0, 270.0]:
         raise AssertionError("die Umrechnung auf halbe Drehzahl stimmt nicht")
@@ -222,5 +274,6 @@ def selbsttest():
             pass
 
     return ("Nockenwelle-Selbsttest bestanden (%d Nocken, Grundkreis %.0f, "
-            "Hub %.1f mm, %.0f mm^3)" % (len(winkel), 2 * rg,
-                                         r_max - rg, shp.Volume))
+            "Hub %.1f mm, Auswanderung %.2f mm -> Tasse mind. %.1f mm, "
+            "%.0f mm^3)" % (len(winkel), 2 * rg, r_max - rg, gemessen,
+                            t.kennwerte["stoessel_mindest_d"], shp.Volume))

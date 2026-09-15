@@ -41,6 +41,7 @@ def kennwerte(bohrung=86.0, kompressionshoehe=32.0, bolzen_d=22.0,
 def baue(bohrung=86.0, kompressionshoehe=32.0, bolzen_d=22.0,
          schafthoehe=48.0, boden_t=7.0, ringe=3, ringnut_h=1.5,
          ringnut_t=2.0, laufspiel=0.12, pleuel_b=17.0, pleuel_spiel=0.5,
+         feuersteg=0.0, ringsteg=0.0, desachsierung=0.0,
          ventiltaschen=None, name="Kolben"):
     """Ein Kolben als :class:`Bauteil`.
 
@@ -48,6 +49,21 @@ def baue(bohrung=86.0, kompressionshoehe=32.0, bolzen_d=22.0,
                        kleiner
     kompressionshoehe  Bolzenmitte bis Kolbenboden [mm]
     bolzen_d           Kolbenbolzendurchmesser [mm]
+    feuersteg          Abstand von der Bodenkante zur Oberflanke der ersten
+                       Ringnut [mm]; 0 = ``boden_t``. Beim Ottomotor 4 bis
+                       10 % der Bohrung. Er hält den ersten Ring aus der
+                       heißesten Zone heraus und ist zugleich ein Spalt, der
+                       unverbranntes Gemisch festhält — deshalb so klein wie
+                       eben möglich.
+    ringsteg           Höhe des Steges zwischen zwei Ringnuten [mm];
+                       0 = 2 · ``ringnut_h``. Der erste Ringsteg trägt den
+                       vollen Gasdruck und ist mit 4,0 bis 5,5 % der Bohrung
+                       der kräftigste.
+    desachsierung      Versatz der Bolzenachse gegen die Kolbenlängsachse
+                       [mm], quer zur Bolzenachse. Er ändert den
+                       Anlagewechsel des Schafts an der Zylinderwand und
+                       senkt Laufgeräusch und Kavitationsgefahr. Üblich rund
+                       1 % der Bohrung; das Vorzeichen zeigt zur Druckseite.
     schafthoehe        Bolzenmitte bis Schaftende [mm]
     boden_t            Dicke des Kolbenbodens [mm]
     ringe              Zahl der Kolbenringe
@@ -84,15 +100,23 @@ def baue(bohrung=86.0, kompressionshoehe=32.0, bolzen_d=22.0,
     # Grundkoerper: von -sh (Schaftende) bis +kh (Boden), Ursprung = Bolzen.
     koerper = Part.makeCylinder(r, kh + sh, Vector(0, 0, -sh))
 
-    # Ringnuten, von oben nach unten unter dem Boden.
-    z = kh - float(boden_t)
-    for _i in range(max(0, int(ringe))):
+    # Ringnuten. Ueber der ERSTEN liegt der Feuersteg, zwischen den
+    # weiteren je ein Ringsteg — beides eigene Masse, keine Vielfachen der
+    # Nuthoehe. Frueher war der Feuersteg mit der Bodendicke identisch und
+    # der Ringsteg doppelte Nuthoehe (2 x 1,5 = 3 mm, also 0,023 x Bohrung
+    # statt der geforderten 0,040…0,055).
+    fs = float(feuersteg) or float(boden_t)
+    rs = float(ringsteg) or 2.0 * float(ringnut_h)
+    z = kh - fs
+    for i in range(max(0, int(ringe))):
         z -= float(ringnut_h)
         nut = Part.makeCylinder(r + 1.0, float(ringnut_h), Vector(0, 0, z))
         kern = Part.makeCylinder(r - float(ringnut_t), float(ringnut_h) + 2.0,
                                  Vector(0, 0, z - 1.0))
         koerper = koerper.cut(nut.cut(kern))
-        z -= 2.0 * float(ringnut_h)
+        # Der erste Ringsteg traegt den vollen Gasdruck, die folgenden
+        # weniger — sie duerfen schmaler sein.
+        z -= rs if i == 0 else rs * 0.8
 
     # Schaft aushoehlen: von unten bis knapp unter den Boden.
     hohl_r = r - 4.0
@@ -103,7 +127,8 @@ def baue(bohrung=86.0, kompressionshoehe=32.0, bolzen_d=22.0,
         # Die Bolzennaben bleiben stehen — aber NUR aussen. In der Mitte
         # muss das kleine Pleuelauge Platz haben; ein durchgehender
         # Nabenzylinder hat es um 7936 mm^3 durchdrungen.
-        nabe = Part.makeCylinder(bd, d, Vector(0, -d / 2.0, 0),
+        nabe = Part.makeCylinder(bd, d, Vector(float(desachsierung),
+                                                -d / 2.0, 0),
                                  Vector(0, 1, 0))
         schlitz_b = float(pleuel_b) + 2.0 * float(pleuel_spiel)
         schlitz = Part.makeBox(d + 4.0, schlitz_b, d + 4.0,
@@ -147,21 +172,34 @@ def baue(bohrung=86.0, kompressionshoehe=32.0, bolzen_d=22.0,
                 "Die Ventiltasche bei (%.1f, %.1f) nimmt kein Material weg "
                 "— dann sitzt sie neben dem Kolbenboden." % (tx, ty))
 
-    # Bolzenbohrung quer durch.
+    # Bolzenbohrung quer durch — um die Desachsierung versetzt. Der Versatz
+    # liegt QUER zur Bolzenachse, also in x; die Bolzenachse selbst laeuft
+    # in y.
+    da = float(desachsierung)
     koerper = koerper.cut(Part.makeCylinder(bd / 2.0, d + 4.0,
-                                            Vector(0, -d / 2.0 - 2.0, 0),
+                                            Vector(da, -d / 2.0 - 2.0, 0),
                                             Vector(0, 1, 0)))
 
     return Bauteil(
         name,
         koerper=[(name, koerper.removeSplitter())],
         punkte=[
-            Punkt("bolzen", (0, 0, 0), (0, 1, 0), "welle", bd,
+            Punkt("bolzen", (float(desachsierung), 0, 0), (0, 1, 0),
+                  "welle", bd,
                   "Kolbenbolzenmitte – hier haengt das Pleuel"),
             Punkt("boden", (0, 0, kh), (0, 0, 1), "flaeche", d,
                   "Kolbenboden – begrenzt den Brennraum"),
             Punkt("laufbahn", (0, 0, kh - float(boden_t)), (0, 0, 1),
                   "gleitbahn", d, "Ringpartie – laeuft in der Zylinderbohrung"),
+            # Eine Marke auf der lokalen +X-Seite. Sie traegt nichts und
+            # paart mit nichts — sie sagt nach dem Andocken, WOHIN die
+            # lokale X-Richtung gefallen ist. Das ist nicht vorhersagbar:
+            # ``richte()`` legt die Drehung um den Bolzen fest, und ob
+            # lokal +X dann laengs oder quer zur Kurbelwelle zeigt, kippt
+            # zwischen den Baenken eines V-Motors um. Die gekippten
+            # Ventiltaschen haengen daran.
+            Punkt("quermarke", (r, 0, 0), (1, 0, 0), "flaeche", 0.0,
+                  "Marke auf der lokalen +X-Seite – nur zur Orientierung"),
         ],
         kennwerte=kennwerte(bohrung, kh, bd, sh))
 
@@ -219,5 +257,45 @@ def selbsttest():
         raise AssertionError("zu kleine Kompressionshoehe blieb unbemerkt")
     except ValueError:
         pass
+    # --- Feuersteg, Ringstege, Desachsierung -----------------------------
+    # Die erste Ringnut muss GENAU einen Feuersteg unter der Bodenkante
+    # liegen — das ist der Richtwert (4…10 % der Bohrung beim Ottomotor),
+    # und er war frueher mit der Bodendicke verwechselt.
+    fs, rst = 5.2, 3.9
+    t2 = baue(bohrung=86.0, kompressionshoehe=32.0, feuersteg=fs,
+              ringsteg=rst, ringnut_h=1.5, ringe=3)
+    shp2 = t2.koerper[0][1]
+    kh = 32.0
+    # In der Nut fehlt Material: ein duenner Ring auf Hoehe der Nut trifft
+    # weniger als einer auf Hoehe des Steges.
+    def ring_bei(z):
+        aussen = Part.makeCylinder(86.0 / 2.0, 0.4, Vector(0, 0, z))
+        innen = Part.makeCylinder(86.0 / 2.0 - 1.0, 0.6,
+                                  Vector(0, 0, z - 0.1))
+        return shp2.common(aussen.cut(innen)).Volume
+    voll = ring_bei(kh - fs / 2.0)              # mitten im Feuersteg
+    leer = ring_bei(kh - fs - 0.75)             # mitten in der 1. Nut
+    if not voll > leer * 3.0:
+        raise AssertionError(
+            "die erste Ringnut liegt nicht unter dem Feuersteg "
+            "(Steg %.1f, Nut %.1f mm^3)" % (voll, leer))
+    steg = ring_bei(kh - fs - 1.5 - rst / 2.0)  # mitten im 1. Ringsteg
+    if not steg > leer * 3.0:
+        raise AssertionError("der erste Ringsteg fehlt (%.1f gegen %.1f)"
+                             % (steg, leer))
+
+    # Desachsierung: der Bolzen sitzt versetzt, und der Anschlusspunkt sagt
+    # es auch — sonst haengt das Pleuel woanders als die Bohrung sitzt.
+    versatz = 0.9
+    t3 = baue(bohrung=86.0, kompressionshoehe=32.0, desachsierung=versatz)
+    if abs(t3.punkt("bolzen").ort.x - versatz) > 1e-9:
+        raise AssertionError("der Anschlusspunkt folgt der Desachsierung "
+                             "nicht (%.2f statt %.2f)"
+                             % (t3.punkt("bolzen").ort.x, versatz))
+    probe = Part.makeCylinder(22.0 / 2.0, 200.0,
+                              Vector(versatz, -100.0, 0), Vector(0, 1, 0))
+    if t3.koerper[0][1].common(probe).Volume > 1.0:
+        raise AssertionError("die Bolzenbohrung sitzt nicht auf dem Versatz")
+
     return ("Kolben-Selbsttest bestanden (d %.2f mm, %.0f mm hoch, %.0f mm^3)"
             % (b.XLength, b.ZLength, shp.Volume))

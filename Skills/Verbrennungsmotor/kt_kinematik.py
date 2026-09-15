@@ -52,23 +52,32 @@ def kolbenweg(kurbelwinkel_grad, kurbelradius, stichmass):
     return r * (1.0 - math.cos(phi)) + l * (1.0 - math.sqrt(wurzel))
 
 
-def pleuelrichtung(hubzapfen, achse, stichmass):
+def pleuelrichtung(hubzapfen, achse, stichmass, versatz=None):
     """Richtung vom Hubzapfen zum Kolbenbolzen.
 
-    Der Kolbenbolzen liegt auf der Zylinderachse (einer Geraden durch die
-    Kurbelwellenmitte in Richtung ``achse``), im Abstand ``stichmass`` vom
-    Hubzapfen. Das ist die Schubkurbel: aus
+    Der Kolbenbolzen liegt auf einer Geraden in Richtung ``achse``, im
+    Abstand ``stichmass`` vom Hubzapfen. Das ist die Schubkurbel: aus
 
-        |t·achse − P| = l
+        |Q + t·achse − P| = l
 
-    folgt ``t = achse·P + sqrt((achse·P)² − |P|² + l²)``. Die positive
-    Wurzel ist der Kolben oberhalb der Kurbel.
+    folgt ``t = achse·R + sqrt((achse·R)² − |R|² + l²)`` mit ``R = P − Q``.
+    Die positive Wurzel ist der Kolben oberhalb der Kurbel.
+
+    ``versatz`` ist der Stützpunkt Q der Geraden. Ohne ihn geht sie durch
+    die Kurbelwellenmitte — das ist der Normalfall. Mit ihm liegt sie um
+    die **Desachsierung** daneben: der Kolbenbolzen sitzt im Kolben
+    außermittig, und wenn der Kolben selbst auf der Zylinderachse laufen
+    soll, muss der Bolzen genau um diesen Betrag daneben liegen. Ohne
+    diesen Stützpunkt wandert stattdessen der ganze Kolben von der
+    Zylinderachse weg — gemessen bei einem V8 auf (−128,0 | 129,1) statt
+    auf der Bankachse.
     """
     p = Vector(hubzapfen)
     a = Vector(achse)
     a.normalize()
+    q = Vector(versatz) if versatz is not None else Vector(0, 0, 0)
     # Nur die Ebene senkrecht zur Kurbelwelle zaehlt; x bleibt, wie es ist.
-    p_eben = Vector(0.0, p.y, p.z)
+    p_eben = Vector(0.0, p.y - q.y, p.z - q.z)
     ap = a.dot(p_eben)
     wurzel = ap * ap - p_eben.Length ** 2 + float(stichmass) ** 2
     if wurzel < 0.0:
@@ -76,7 +85,7 @@ def pleuelrichtung(hubzapfen, achse, stichmass):
             "Das Stichmass %.1f mm reicht nicht bis zur Zylinderachse — der "
             "Kurbelradius ist zu gross." % float(stichmass))
     t = ap + math.sqrt(wurzel)
-    bolzen = Vector(p.x, a.y * t, a.z * t)
+    bolzen = Vector(p.x, q.y + a.y * t, q.z + a.z * t)
     richtung = bolzen.sub(p)
     if richtung.Length < 1e-9:
         return Vector(a)

@@ -200,6 +200,9 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
         wange_t=a["wange_t"], hauptlager_b=a["hauptlager_b"],
         kolben_schafthoehe=a["kolben_schafthoehe"],
         kolben_boden_t=a["kolben_boden_t"],
+        kolben_feuersteg=a["kolben_feuersteg"],
+        kolben_ringsteg=a["kolben_ringsteg"],
+        kolben_desachsierung=a["kolben_desachsierung"],
         bankwinkel=bankwinkel,
         v8_kreuzebene=v8_kreuzebene, ventiltaschen=taschen)
 

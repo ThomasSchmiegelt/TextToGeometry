@@ -41,11 +41,23 @@ from kt_schnittstelle import Bauteil, Punkt
 #: Bauarten, die die Maske anbietet.
 ARTEN = ("zahnrad", "kette")
 
-#: Genormte Kettenteilungen [mm], von grob nach fein: 1/2", 3/8", 8 mm,
-#: 1/4", 3/16". Steuerketten sind die feinen — je feiner die Teilung, desto
-#: kleiner das Rad bei gleicher Zähnezahl, und darauf kommt es an, wenn zwei
-#: Nockenwellen dicht nebeneinander liegen.
-TEILUNGEN = (12.7, 9.525, 8.0, 6.35, 4.762)
+#: Genormte Kettenteilungen [mm] nach DIN 8187 / DIN 8188 / ISO 606, von
+#: grob nach fein, mit ihren Kurzzeichen:
+#:
+#:     12,7 mm  = 1/2"   08B-1 bzw. ANSI 40
+#:      9,525   = 3/8"   06B-1 bzw. ANSI 35
+#:      8,0             05B-1
+#:      6,35    = 1/4"   ANSI 25
+#:
+#: Steuerketten sind die feinen. Je feiner die Teilung, desto kleiner das
+#: Rad bei gleicher Zähnezahl — und darauf kommt es an, wenn zwei
+#: Nockenwellen dicht nebeneinander liegen. Die Zahngeometrie der Räder
+#: steht in DIN 8196.
+TEILUNGEN = (12.7, 9.525, 8.0, 6.35)
+
+#: Rollendurchmesser je Teilung [mm], aus den Normtabellen. 06B hat 6,35 mm
+#: bei 9,525 Teilung, 08B hat 8,51 bei 12,7 — also rund zwei Drittel.
+ROLLEN = {12.7: 8.51, 9.525: 6.35, 8.0: 5.0, 6.35: 4.0}
 
 
 class SteuertriebFehler(Exception):
@@ -99,7 +111,7 @@ def auslegen_kette(zaehne_kurbel, abstand, kurbel_d=30.0, nocken_d=26.0,
     for p in sorted(teilungen, reverse=True):
         d1, _ = kettenradmasse(z1, p)
         d2, _ = kettenradmasse(z2, p)
-        rollen = p * 2.0 / 3.0
+        rollen = ROLLEN.get(p) or p * 2.0 / 3.0
         if d2 - rollen > platz:
             continue                       # Nockenraeder stossen zusammen
         if d1 - rollen < float(kurbel_d) + 2.0 * float(wand):
@@ -216,7 +228,8 @@ def baue(art="kette", zaehne_kurbel=20, modul=3.0, teilung=9.525,
     # Die Rolle gehoert zur Teilung: 6,35 mm ist die Rolle einer 3/8"-Kette.
     # Mit einer feineren Teilung muss sie mitschrumpfen, sonst fressen die
     # Rollen den Zahn auf.
-    rollen_d = float(rollen_d) or round(float(teilung) * 2.0 / 3.0, 3)
+    rollen_d = (float(rollen_d) or ROLLEN.get(round(float(teilung), 3))
+                or round(float(teilung) * 2.0 / 3.0, 3))
     k = kennwerte(art, z1, modul, teilung, achsabstand)
     a = k["achsabstand"]
     teile = []

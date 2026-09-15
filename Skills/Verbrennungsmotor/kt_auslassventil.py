@@ -38,6 +38,9 @@ SCHAFT_ANTEIL = 0.080
 #: Anteil des Schaftdurchmessers, den die Natriumbohrung einnimmt.
 HOHL_ANTEIL = 0.55
 
+#: Tragende Breite der Sitzflaeche [mm]. Der Auslass sitzt breiter: ueber den Sitz geht seine Waerme weg.
+SITZBREITE = 2.0
+
 
 def vorschlag(bohrung=86.0, ventile_je_zylinder=4):
     """Üblicher Tellerdurchmesser [mm]."""
@@ -78,6 +81,7 @@ def baue(bohrung=86.0, ventile_je_zylinder=4, teller_d=0.0, schaft_d=0.0,
     if hohl and hohl / 2.0 >= s / 2.0 - 0.8:
         hohl = 0.0
     t = kt_ventil.baue(teller_d=d, schaft_d=s, laenge=float(laenge),
+                       sitzbreite=SITZBREITE,
                        kegel_form=2.0, hohl_d=hohl, name=name)
     t.kennwerte["art"] = "auslass"
     t.kennwerte["hohl"] = bool(hohl)
@@ -138,10 +142,22 @@ def selbsttest():
                              % (tulpe.koerper[0][1].Volume,
                                 gerade.koerper[0][1].Volume))
 
+    # Der Auslass sitzt BREITER als der Einlass — ueber den Sitz geht seine
+    # Waerme weg.
+    if not t.kennwerte["sitzbreite"] > ein.kennwerte["sitzbreite"]:
+        raise AssertionError("der Auslasssitz muss breiter sein (%.1f gegen "
+                             "%.1f mm)" % (t.kennwerte["sitzbreite"],
+                                           ein.kennwerte["sitzbreite"]))
+    rand = t.kennwerte["tellerrand_h"] / d
+    if not 0.04 <= rand <= 0.06:
+        raise AssertionError("Tellerrand %.3f x Teller, Soll 0,04…0,06"
+                             % rand)
+
     for pflicht in ("sitz", "schaft", "schaft_ende"):
         t.punkt(pflicht)
     return ("Auslassventil-Selbsttest bestanden (Teller %.1f, Schaft %.1f, "
-            "Natriumbohrung %.1f mm nimmt %.0f mm^3, Tulpe %.0f gegen %.0f "
-            "mm^3)" % (d, t.kennwerte["schaft_d"], t.kennwerte["hohl_d"],
-                       fehlt, tulpe.koerper[0][1].Volume,
-                       gerade.koerper[0][1].Volume))
+            "Sitz %.1f mm breit, Natriumbohrung %.1f mm nimmt %.0f mm^3, "
+            "Tulpe %.0f gegen %.0f mm^3)"
+            % (d, t.kennwerte["schaft_d"], t.kennwerte["sitzbreite"],
+               t.kennwerte["hohl_d"], fehlt, tulpe.koerper[0][1].Volume,
+               gerade.koerper[0][1].Volume))

@@ -46,15 +46,29 @@ def vorschlag(bohrung=86.0, ventile_je_zylinder=4, einlass=True):
     return round(d * (0.45 if einlass else 0.38), 1)
 
 
-def kennwerte(teller_d=31.0, schaft_d=6.0, laenge=110.0, fase=45.0, **_rest):
+def kennwerte(teller_d=31.0, schaft_d=6.0, laenge=110.0, fase=45.0,
+              sitzbreite=1.5, tellerrand_h=0.0, **_rest):
+    """Die Maße, die der Zylinderkopf und der Ventiltrieb brauchen.
+
+    ``sitzbreite`` ist die tragende Breite der Dichtfläche — beim Einlass
+    rund 1,5 mm, beim Auslass rund 2 mm, denn dort geht die Wärme über den
+    Sitz weg und eine breitere Fläche leitet besser. ``tellerrand_h`` ist die
+    Höhe des zylindrischen Randes über der Fase; üblich sind 4 bis 6 % des
+    Tellerdurchmessers, und ein zu dünner Rand brennt ab.
+    """
     d = float(teller_d)
-    # Der wirksame Sitzdurchmesser liegt eine Fasenbreite innen.
     return {
         "teller_d": d,
         "schaft_d": float(schaft_d),
         "laenge": float(laenge),
-        "sitz_d": round(d - 2.0, 2),
+        # Der wirksame Sitzdurchmesser liegt eine halbe Sitzbreite innen,
+        # gemessen auf der 45-Grad-Fase.
+        "sitz_d": round(d - float(sitzbreite) * math.cos(
+            math.radians(float(fase))), 2),
+        "sitzbreite": float(sitzbreite),
         "sitzwinkel": float(fase),
+        "tellerrand_h": round(float(tellerrand_h) or d * 0.05, 2),
+        "teller_anteil_schaft": round(float(schaft_d) / d, 4),
     }
 
 
@@ -89,15 +103,16 @@ def _uebergang(rt, rs, hoehe, z0, form=1.0, stuecke=8):
     return koerper
 
 
-def baue(teller_d=31.0, schaft_d=6.0, laenge=110.0, teller_t=3.0, fase=45.0,
+def baue(teller_d=31.0, schaft_d=6.0, laenge=110.0, teller_t=0.0, fase=45.0,
          fase_b=2.0, kegel_h=9.0, nut_t=0.8, nut_h=3.0, kegel_form=1.0,
-         hohl_d=0.0, hohl_anteil=0.75, name="Ventil"):
+         hohl_d=0.0, hohl_anteil=0.75, sitzbreite=1.5, name="Ventil"):
     """Ein Ventil als :class:`Bauteil`.
 
     teller_d    Tellerdurchmesser [mm]
     schaft_d    Schaftdurchmesser [mm]
     laenge      Gesamtlänge von der Tellerunterkante bis zum Schaftende [mm]
-    teller_t    Dicke des Tellerrandes [mm]
+    teller_t    Höhe des zylindrischen Tellerrandes [mm]; 0 = 5 % des
+                Tellerdurchmessers (üblich 4…6 %)
     fase        Sitzwinkel [Grad], üblich 45
     kegel_h     Höhe des Übergangs Teller → Schaft [mm]
     nut_t       Tiefe der Keilnut am Schaftende [mm]
@@ -107,6 +122,9 @@ def baue(teller_d=31.0, schaft_d=6.0, laenge=110.0, teller_t=3.0, fase=45.0,
                 Schaft des Auslassventils. Der Körper bleibt ein Solid,
                 bekommt aber eine zweite Schale.
     hohl_anteil Bis zu welchem Anteil der Länge die Bohrung reicht
+    sitzbreite  tragende Breite der Dichtfläche [mm] — 1,5 am Einlass,
+                2,0 am Auslass. Sie geht in den ausgewiesenen
+                Sitzdurchmesser ein, den der Zylinderkopf braucht.
     """
     rt = float(teller_d) / 2.0
     rs = float(schaft_d) / 2.0
@@ -118,7 +136,10 @@ def baue(teller_d=31.0, schaft_d=6.0, laenge=110.0, teller_t=3.0, fase=45.0,
         raise ValueError("Ventillaenge %.1f mm ist zu kurz fuer Teller, "
                          "Kegel und Keilnut." % l)
 
-    # Tellerrand mit Sitzfase: ein Kegelstumpf, unten schmaler.
+    # Tellerrand mit Sitzfase: ein Kegelstumpf, unten schmaler. Der
+    # Tellerrand darueber ist 4 bis 6 % des Tellerdurchmessers hoch; fest
+    # 3 mm waren bei 31 mm Teller fast 10 %.
+    teller_t = float(teller_t) or round(float(teller_d) * 0.05, 2)
     fb = float(fase_b)
     unten_r = rt - fb * math.tan(math.radians(float(fase)) / 1.0) * 0.0 - fb
     teller = Part.makeCone(max(unten_r, rs + 0.5), rt, fb, Vector(0, 0, 0))
@@ -167,7 +188,9 @@ def baue(teller_d=31.0, schaft_d=6.0, laenge=110.0, teller_t=3.0, fase=45.0,
                   float(schaft_d),
                   "Schaftende – hier drueckt der Stoessel"),
         ],
-        kennwerte=kennwerte(teller_d, schaft_d, l, fase))
+        kennwerte=kennwerte(teller_d, schaft_d, l, fase,
+                            sitzbreite=sitzbreite,
+                            tellerrand_h=teller_t))
 
 
 def selbsttest():
