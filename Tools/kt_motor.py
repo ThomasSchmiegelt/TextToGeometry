@@ -362,6 +362,7 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
 
     je_seite = max(1, int(ventile_je_zylinder) // 2)
     nockenachsen = {}
+    fluchtungen = []
     for nr, (seite, _x, bankwinkel, zapfen) in enumerate(lagen, 1):
         richtung = _zylinderachse(bankwinkel)
         mitte = Vector(zylinder_x[nr], 0.0, 0.0)
@@ -412,18 +413,19 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
             hub_jetzt = _nockenhub(nw_winkel, ventilhub,
                                    nocken_grundkreis_r,
                                    stoessel_winkel=180.0)
-            hoch = Vector(richtung).multiply(k["blockhoehe"] - hub_jetzt)
-            quer_v = Vector(quer).multiply(seitwaerts)
-            fuss = Vector(mitte).add(hoch).add(Vector(laengs, 0, 0)) \
-                .add(quer_v)
             neigung = float(ventilwinkel) * (-1.0 if art == "einlass"
                                              else 1.0)
             v_richtung = FreeCAD.Rotation(Vector(1, 0, 0), neigung) \
                 .multVec(Vector(richtung))
-            nockenachsen.setdefault((seite, art), []).append(
-                (Vector(mitte).add(Vector(quer).multiply(seitwaerts))
-                 .add(Vector(laengs, 0, 0)), v_richtung, nw_winkel,
-                 bankwinkel + neigung))
+            # Ein Ventil oeffnet entlang SEINER EIGENEN Achse, nicht entlang
+            # der Zylinderachse. Mit dem Hub auf der Zylinderachse gerechnet
+            # wandert die Nockenwellenachse mit dem Hub, und die Wellen
+            # passten je Zylinder nicht mehr auf ihre Stoessel (11 %
+            # Durchdringung bei den V-Motoren).
+            hoch = Vector(richtung).multiply(k["blockhoehe"])
+            quer_v = Vector(quer).multiply(seitwaerts)
+            fuss = Vector(mitte).add(hoch).add(Vector(laengs, 0, 0)) \
+                .add(quer_v).sub(Vector(v_richtung).multiply(hub_jetzt))
             # Zwei Flaechen, die sich beruehren, haben ENTGEGENGESETZTE
             # Normalen. Die Sitzflaeche des Ventils zeigt nach unten (in den
             # Brennraum), also muss der Sitz im Kopf nach oben zeigen — sonst
@@ -448,6 +450,31 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
             teile.extend([("%s %d.%d" % (n, nr, j + 1), s)
                           for n, s in st.koerper])
             proben.append((st.punkt("ventil"), ventil.punkt("schaft_ende")))
+            # Bei einem Tassenstoesselmotor liegt die Nockenwellenachse
+            # GENAU UEBER der Ventilachse — der Nocken drueckt senkrecht auf
+            # den Tassenboden. Die Achse wird deshalb aus dem Stoessel
+            # abgeleitet, nicht aus der Zylinderachse: bei geneigten Ventilen
+            # sind das zwei verschiedene Geraden, und das Ergebnis sah aus
+            # wie ein Schlepphebelmotor.
+            nocken_achse = Vector(st.punkt("nocken").ort).add(
+                Vector(v_richtung).multiply(
+                    nocken_grundkreis_r + hub_jetzt))
+            # Der Kippwinkel der Nockenwelle: im Wellenbild zeigt 180 Grad
+            # nach -Z; nach der Drehung um kippung muss das -v_richtung
+            # sein. Aus Rot(X, d)*(0,0,-1) = (0, sin d, -cos d) und
+            # -v_richtung = (0, -sin phi, -cos phi) folgt d = -phi, und phi
+            # ist der Winkel von v_richtung, also bankwinkel - neigung.
+            # Mit bankwinkel + neigung gerechnet stimmte es nur fuer
+            # Reihenmotoren (bankwinkel = 0); bei den V-Motoren stand die
+            # Welle 90 Grad daneben und drueckte in die Stoessel.
+            nockenachsen.setdefault((seite, art), []).append(
+                (nocken_achse, v_richtung, nw_winkel,
+                 neigung - bankwinkel))
+            # Fuer die Pruefung: Stoesselachse und die Achse, auf der die
+            # Nockenwelle liegen wird.
+            fluchtungen.append((Vector(st.punkt("nocken").ort),
+                                Vector(v_richtung), Vector(nocken_achse),
+                                "%s %d.%d" % (art, nr, j + 1)))
             # Die Feder sitzt mit ihrem Teller am Schaftende. Hier stossen
             # NICHT zwei Flaechen gegeneinander: Tellerkante und Schaftende
             # zeigen beide nach oben, die Feder haengt darunter. Mit der
@@ -479,7 +506,7 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
         nw = kt_nockenwelle.baue(winkel=winkel, orte=orte, hub=ventilhub,
                                  grundkreis_d=2.0 * nocken_grundkreis_r)
         ort0, richtung0, _w, kippung = eintraege[0]
-        achse = Vector(ort0).add(Vector(richtung0).multiply(hoehe))
+        achse = Vector(ort0)      # schon die fertige Nockenwellenachse
         # Die Welle wird in x schon richtig gebaut, quer versetzt UND um
         # denselben Winkel gekippt wie ihre Ventile — dann stehen ihre
         # Nocken senkrecht auf den Stoesseln.
@@ -489,37 +516,49 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
         gesetzt = nw.bewegt(versch)
         teile.extend([("Nockenwelle %d (%s)" % (lfd, art), s)
                       for _n, s in gesetzt.koerper])
-        if art == "einlass":
-            nocken_lage[seite] = Vector(0.0, achse.y, achse.z)
+        nocken_lage.setdefault(seite, []).append(
+            (art, Vector(0.0, achse.y, achse.z)))
+        k.setdefault("nockenachsen", []).append(
+            {"bank": seite + 1, "art": art,
+             "y": round(achse.y, 2), "z": round(achse.z, 2)})
 
-    # --- Steuertrieb: JE BANK einer ---------------------------------------
+    # --- Steuertrieb: JE BANK einer, ueber ALLE Nockenwellen --------------
     # Ein V-Motor hat zwei Zylinderbaenke mit je eigenen Nockenwellen, und
-    # jede braucht ihren Antrieb. Ein einzelner Kettentrieb kann nicht beide
-    # erreichen.
+    # jede braucht ihren Antrieb. Innerhalb einer Bank haengen bei einem
+    # DOHC-Kopf BEIDE Wellen an derselben Kette — Einlass und Auslass. Wird
+    # nur eine angetrieben, laeuft die andere gar nicht.
+    nase = kw.punkt("steuertrieb")
+    anzahl = max(1, len(nocken_lage))
     for seite in sorted(nocken_lage) or [0]:
-        lage = nocken_lage.get(seite, Vector(0, 0, hoehe))
-        abstand_nw = math.hypot(lage.y, lage.z) or hoehe
+        wellen = nocken_lage.get(seite) or [("einlass", Vector(0, 0, hoehe))]
+        # Der Trieb wird gleich in Dokumentkoordinaten gebaut: die Lagen
+        # der Nockenwellen sind schon die richtigen. Frueher wurde ein
+        # ebener Trieb um X gekippt — mit zwei Wellen je Bank, die
+        # verschieden weit von der Kurbel stehen, geht das nicht mehr auf.
+        lagen = [(w.y, w.z) for _art, w in wellen]
+        abstand_nw = max(math.hypot(y, z) for y, z in lagen) or hoehe
         st = kt_steuertrieb.baue(art=steuertrieb,
                                  zaehne_kurbel=zaehne_kurbel,
-                                 achsabstand=abstand_nw, doc=doc)
-        # Der Trieb wird in der YZ-Ebene nach +z gebaut; in die Bankebene
-        # gedreht zeigt er auf die Nockenwelle dieser Bank.
-        # Drehsinn nachgemessen: eine Drehung um +X fuehrt +z nach +y.
-        kipp = math.degrees(math.atan2(lage.y, lage.z))
-        gedreht = st.bewegt(FreeCAD.Placement(
-            Vector(0, 0, 0), FreeCAD.Rotation(Vector(1, 0, 0), kipp)))
+                                 achsabstand=abstand_nw,
+                                 nocken_lagen=lagen, doc=doc)
         # Die Kurbelraeder der beiden Baenke sitzen NEBENEINANDER auf der
         # Kurbelnase — uebereinander gesetzt durchdringen sie sich zu 100 %.
-        nase = kw.punkt("steuertrieb")
-        anzahl = max(1, len(nocken_lage))
         versatz_x = (seite - (anzahl - 1) / 2.0) * 16.0
         ziel_nase = S.Punkt(nase.name,
                             Vector(nase.ort).add(Vector(versatz_x, 0, 0)),
                             nase.achse, nase.art, nase.mass, nase.hinweis)
-        gesetzt = S.andocke(gedreht, "kurbel", ziel_nase)
+        gesetzt = S.andocke(st, "kurbel", ziel_nase)
         teile.extend([("Bank %d: %s" % (seite + 1, n), sh)
                       for n, sh in gesetzt.koerper])
+        proben.append((gesetzt.punkt("kurbel"), ziel_nase))
         k.setdefault("steuertriebe", []).append(st.kennwerte)
+        # Fuer die Pruefung: jede Nockenwelle mit dem Ort ihres Rades.
+        for nr, (art, w) in enumerate(wellen, 1):
+            rad = gesetzt.punkt("nocken" if nr == 1 else "nocken_%d" % nr)
+            k.setdefault("angetrieben", []).append(
+                {"bank": seite + 1, "art": art,
+                 "welle_y": round(w.y, 3), "welle_z": round(w.z, 3),
+                 "rad_y": round(rad.ort.y, 3), "rad_z": round(rad.ort.z, 3)})
     k["steuertrieb"] = k.get("steuertriebe", [{}])[0]
 
     # --- Getriebe anflanschen --------------------------------------------
@@ -527,6 +566,7 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
         teile.extend(_getriebe_anflanschen(kw.punkt("abtrieb"), k, doc,
                                            getriebe_gaenge))
 
+    k["fluchtungen"] = fluchtungen
     return teile, k, proben
 
 
@@ -649,6 +689,45 @@ def pruefe(teile=None, proben=None, kenn=None, toleranz=0.02, **kw):
     sag(schlimm < toleranz,
         "groesste Durchdringung %.1f %% (erlaubt %.0f %%)%s"
         % (schlimm * 100, toleranz * 100, (" bei " + wo) if wo else ""))
+
+    # Tassenstoessel: die Nockenwellenachse muss GENAU UEBER der
+    # Ventilachse liegen. Gemessen wird der senkrechte Abstand zweier
+    # Geraden — der Nockenwellenachse (entlang x) und der Stoesselachse.
+    if kenn and kenn.get("fluchtungen"):
+        schief = 0.0
+        wo = ""
+        x_achse = Vector(1, 0, 0)
+        for punkt, richtung, achse, name in kenn["fluchtungen"]:
+            n = x_achse.cross(richtung)
+            if n.Length < 1e-9:
+                continue
+            n.normalize()
+            d = abs(Vector(punkt).sub(achse).dot(n))
+            if d > schief:
+                schief, wo = d, name
+        sag(schief < 0.05,
+            "Nockenwellen- und Ventilachse fluchten (groesster Versatz "
+            "%.3f mm%s)" % (schief, (" bei " + wo) if wo else ""))
+
+    # Jede Nockenwelle muss ihr Rad am Steuertrieb haben. Bei einem
+    # DOHC-Kopf sind das zwei je Bank; angetrieben wurde lange nur die
+    # erste, die zweite lief gar nicht mit.
+    if kenn and kenn.get("angetrieben"):
+        offen = []
+        for e in kenn["angetrieben"]:
+            ab = math.hypot(e["rad_y"] - e["welle_y"],
+                            e["rad_z"] - e["welle_z"])
+            if ab > 0.05:
+                offen.append("Bank %d %s (%.2f mm daneben)"
+                             % (e["bank"], e["art"], ab))
+        sag(not offen,
+            "alle %d Nockenwellen haengen an der Kette%s"
+            % (len(kenn["angetrieben"]),
+               "" if not offen else ": " + "; ".join(offen)))
+        if kenn.get("nockenachsen"):
+            sag(len(kenn["angetrieben"]) == len(kenn["nockenachsen"]),
+                "%d angetriebene von %d Nockenwellen"
+                % (len(kenn["angetrieben"]), len(kenn["nockenachsen"])))
 
     # Bankversatz: die zweite Bank muss um genau eine Pleuelbreite
     # versetzt stehen, und jede Bank fuer sich in einer Reihe.

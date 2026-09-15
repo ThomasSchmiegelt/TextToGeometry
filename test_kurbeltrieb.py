@@ -9,6 +9,7 @@ Der lange Teil — alle zehn Bauformen zusammenbauen — läuft nur mit
 ``T2G_TEST_LANG=1``; ohne das werden zwei Bauformen geprüft, damit der
 normale Testlauf nicht siebzig Sekunden braucht.
 """
+import math
 import os
 import sys
 
@@ -18,6 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "Tools"))
 
+import Part
 import FreeCAD
 import FreeCADGui
 
@@ -195,6 +197,56 @@ pruefe(len(kurbelraeder) == 2, "je Bank ein Steuertrieb (%d Kurbelraeder)"
 if len(kurbelraeder) == 2:
     pruefe(kurbelraeder[0].common(kurbelraeder[1]).Volume < 1.0,
            "die beiden Kurbelraeder sitzen nebeneinander")
+
+# JEDE Nockenwelle braucht ihr Kettenrad — beim V8 sind das vier, zwei je
+# Bank. Angetrieben wurde lange nur die erste jeder Bank, die zweite lief
+# ueberhaupt nicht mit.
+nockenraeder = [(n, s) for n, s in teile if "Kettenrad Nocken" in n]
+pruefe(len(nockenraeder) == 4,
+       "vier Nockenwellenraeder beim V8 (%d)" % len(nockenraeder))
+daneben = []
+for n, s in nw:
+    # Die Wellenachse NICHT aus der Bounding Box nehmen — die Nocken stehen
+    # einseitig heraus und verschieben ihre Mitte um gut 5 mm. Der
+    # Antriebszapfen am -x-Ende ist dagegen ein glatter Zylinder auf der
+    # Achse; seine Mitte ist die Achse.
+    b = s.BoundBox
+    scheibe = Part.makeBox(4.0, b.YLength + 20.0, b.ZLength + 20.0,
+                           FreeCAD.Vector(b.XMin + 0.5, b.YMin - 10.0,
+                                          b.ZMin - 10.0))
+    zapfen = s.common(scheibe).BoundBox
+    wy = (zapfen.YMin + zapfen.YMax) / 2.0
+    wz = (zapfen.ZMin + zapfen.ZMax) / 2.0
+    naechstes = min(
+        (math.hypot(mitte(r, "Y") - wy, mitte(r, "Z") - wz)
+         for _rn, r in nockenraeder), default=999.0)
+    if naechstes > 0.5:
+        daneben.append("%s (%.1f mm)" % (n, naechstes))
+pruefe(not daneben,
+       "auf jeder Nockenwelle sitzt ein Kettenrad%s"
+       % ("" if not daneben else ": " + "; ".join(daneben)))
+pruefe(len(kenn.get("angetrieben", [])) == 4,
+       "vier angetriebene Nockenwellen gemeldet (%d)"
+       % len(kenn.get("angetrieben", [])))
+
+# Und die Kette muss jedes Rad wirklich umschlingen, nicht nur daneben
+# vorbeilaufen.
+for bank in (1, 2):
+    b_rollen = [s for n, s in teile
+                if "Kettenrolle" in n and n.startswith("Bank %d" % bank)]
+    b_raeder = [(n, s) for n, s in nockenraeder
+                if n.startswith("Bank %d" % bank)]
+    pruefe(len(b_raeder) == 2,
+           "Bank %d treibt beide Nockenwellen (%d Raeder)"
+           % (bank, len(b_raeder)))
+    for n, r in b_raeder:
+        ry, rz = mitte(r, "Y"), mitte(r, "Z")
+        radius = max(r.BoundBox.YLength, r.BoundBox.ZLength) / 2.0
+        nah = sum(1 for s in b_rollen
+                  if abs(math.hypot(mitte(s, "Y") - ry,
+                                    mitte(s, "Z") - rz) - radius) < 4.0)
+        pruefe(nah >= 4,
+               "%s wird von der Kette umschlungen (%d Rollen)" % (n, nah))
 
 # Ventilwinkel: Ein- und Auslass zeigen in verschiedene Richtungen.
 ein = [s for n, s in teile if n.startswith("Einlassventil 1.")]
