@@ -75,13 +75,23 @@ def kennwerte(art="kette", zaehne_kurbel=20, modul=3.0, teilung=9.525,
         d1 = float(teilung) / math.sin(math.pi / z1)
         d2 = float(teilung) / math.sin(math.pi / z2)
         a = float(achsabstand) or round((d1 + d2) / 2.0 + 60.0, 1)
-    return {
+    k = {
         "art": str(art),
         "zaehne_kurbel": z1,
         "zaehne_nocken": z2,
         "uebersetzung": round(z2 / float(z1), 4),
         "achsabstand": round(a, 2),
     }
+    # Die gewaehlte Teilung gehoert in den Bericht: sie wird je Kopf neu
+    # bestimmt (auslegen_kette), und ohne sie stand im Motorbericht "Teilung
+    # None". Beim Zahnradtrieb ist es der Modul.
+    if str(art) == "zahnrad":
+        k["modul"] = float(modul)
+    else:
+        k["teilung"] = float(teilung)
+        k["rollen_d"] = ROLLEN.get(round(float(teilung), 3)) or round(
+            float(teilung) * 2.0 / 3.0, 3)
+    return k
 
 
 def auslegen_kette(zaehne_kurbel, abstand, kurbel_d=30.0, nocken_d=26.0,
