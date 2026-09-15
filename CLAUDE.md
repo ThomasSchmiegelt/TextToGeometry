@@ -609,14 +609,25 @@ manual is 70–75). It is now `3.6 · shaft`, so 72 mm at two litres and 103.5
 at six, and the tooth sum follows as `2a/m` — that is what actually makes the
 gears big. Wall thickness, bolt size and bearing series follow the shaft too.
 
+And that was still not enough, because **what makes a gearbox long is not the
+gear but what sits between the gears.** Face width went from `6 · module` to
+`8 · module` (vehicle practice is 8–10; six is the lower bound), and the gap
+between gear pairs from a fixed 6 mm to `1.8 · face width` — that gap is
+where the **synchroniser** lives, it is not clearance. One gear step was
+24 mm and the whole six-speed 223 mm against a 728 mm engine; it is now 67 mm
+per step and 482 mm overall, two thirds of the engine. `pruefe()` measures
+the ratio.
+
 Two things that only showed once the gearbox got real size:
 
-- **The countershaft was beside the input shaft, not below it.** The gearbox
-  is built with its second shaft at `+Y`, and at a V engine that is exactly
-  where the bank stands. `_getriebe_anflanschen` now rotates the whole
-  gearbox −90° about the crank axis before translating it — rotate first,
-  then move, or the input shaft itself leaves the axis. `pruefe()` checks
-  the countershaft really sits below.
+- **The countershaft was beside the input shaft, not perpendicular to it.**
+  The gearbox is built with its second shaft at `+Y`, and at a V engine that
+  is exactly where the bank stands. `_getriebe_anflanschen` now rotates the
+  whole gearbox about the crank axis before translating it — rotate first,
+  then move, or the input shaft itself leaves the axis. `DREHUNG` is +90°
+  (countershaft above); which way round is an installation choice, so
+  `pruefe()` checks only that it is *perpendicular*: `|y| < 1 mm` and
+  `|z| = centre distance`.
 - **A 12-tooth gear undercuts.** `gangpaare` had `z_min = 12`, which is
   geometrically possible but below the limit for a 20° involute without
   profile shift; the mating tip digs into the root. Measured on a 12/57
