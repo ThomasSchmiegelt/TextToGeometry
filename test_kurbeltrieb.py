@@ -272,12 +272,24 @@ if ein and aus:
 
 # Ventiltaschen: flach, nicht 13 mm tief.
 kolben1 = [s for n, s in teile if n == "Kolben 1"][0]
-voll = kt_kolben.baue(bohrung=kenn["bohrung"],
-                      kompressionshoehe=kenn["kompressionshoehe"])
+# Der Vergleichskolben muss AUS DERSELBEN AUSLEGUNG kommen, sonst misst man
+# nicht die Taschen, sondern den Unterschied der Vorgabewerte: mit dem
+# alten 48-mm-Schaft statt der 24,1 mm aus der Tabelle kamen 52506 mm^3
+# heraus, und davon war das meiste der fehlende Schaft.
+_a = kenn["auslegung"]
+voll = kt_kolben.baue(bohrung=_a["bohrung"],
+                      kompressionshoehe=_a["kompressionshoehe"],
+                      bolzen_d=_a["kolbenbolzen_d"],
+                      schafthoehe=_a["kolben_schafthoehe"],
+                      boden_t=_a["kolben_boden_t"],
+                      feuersteg=_a["kolben_feuersteg"],
+                      ringsteg=_a["kolben_ringsteg"],
+                      desachsierung=_a["kolben_desachsierung"],
+                      pleuel_b=round(_a["pleuel_auge_b"] + 0.5, 2))
 fehlt = voll.koerper[0][1].Volume - kolben1.Volume
-pruefe(0.0 < fehlt < 30000.0,
-       "die Ventiltaschen nehmen %.0f mm^3 weg (nicht den halben Kolben)"
-       % fehlt)
+pruefe(0.0 < fehlt < 0.25 * voll.koerper[0][1].Volume,
+       "die Ventiltaschen nehmen %.0f mm^3 weg, %.1f %% des Kolbens"
+       % (fehlt, 100.0 * fehlt / voll.koerper[0][1].Volume))
 
 # Kette: gleichmaessige Rollenabstaende.
 rollen = [s for n, s in teile if "Kettenrolle" in n and n.startswith("Bank 1")]
