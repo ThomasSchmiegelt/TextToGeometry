@@ -34,19 +34,27 @@ import kt_pleuel
 import kt_schnittstelle as S
 
 
-def zapfenbreite(bauform, pleuel_breite):
+def zapfenbreite(bauform, pleuel_breite, bankwinkel=0.0):
     """Breite eines Hubzapfens [mm].
 
     Beim V-Motor teilen sich zwei Pleuel einen Hubzapfen — er muss also
     doppelt so breit sein, und die beiden sitzen NEBENEINANDER.
     Übereinander gesetzt durchdrangen sie sich zu 53,6 %.
+
+    Beim Reihenmotor trägt er eines, plus 4 mm Bund. Er **wächst mit der
+    Pleuelbreite**: fest 26 mm getragen, stand bei 120 mm Bohrung ein
+    30,7 mm breites Pleuel auf einem 26 mm breiten Zapfen über.
     """
-    return (2.0 * float(pleuel_breite) + 4.0) if B.ist_v(bauform) else 26.0
+    b = float(pleuel_breite)
+    return (2.0 * b + 4.0) if B.ist_v(bauform, bankwinkel) else (b + 4.0)
 
 
 def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=150.5,
          kompressionshoehe=32.0, zylinderabstand=101.5, bolzen_d=22.0,
          hubzapfen_d=48.0, hauptlager_d=54.0, pleuel_breite=22.0,
+         pleuel_auge_b=0.0, steuertrieb_d=30.0, bankwinkel=0.0,
+         wange_t=0.0, hauptlager_b=0.0, kolben_schafthoehe=0.0,
+         kolben_boden_t=0.0,
          v8_kreuzebene=True, ventiltaschen=None):
     """Kurbelwelle, Pleuel und Kolben.
 
@@ -57,6 +65,12 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=150.5,
     kurbelwelle das :class:`kt_schnittstelle.Bauteil` — der Ventiltrieb
                 braucht seinen Steuertriebzapfen, der Motor den Flansch
     zylinder_x  {Zylindernummer: x-Lage} — wo der Kolben wirklich sitzt
+
+    ``pleuel_auge_b`` ist die Breite des kleinen Auges, und der Kolben muss
+    GENAU dafür seinen Schlitz frei lassen. Im Kolben stand dieses Maß
+    früher fest auf 17 mm, im Pleuel ergab es sich zu 0,75·Breite = 16,5 —
+    bei 86 mm Bohrung passte das zufällig, bei einer breiteren Pleuelstange
+    nicht mehr. Jetzt kommt es aus ``kt_auslegung``, einmal für beide.
     """
     l = float(stichmass)
     pleuel_b = float(pleuel_breite)
@@ -67,30 +81,41 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=150.5,
                              zylinderabstand=zylinderabstand,
                              hauptlager_d=hauptlager_d,
                              hubzapfen_d=hubzapfen_d,
-                             hubzapfen_b=zapfenbreite(bauform, pleuel_b),
+                             hubzapfen_b=zapfenbreite(bauform, pleuel_b,
+                                                      bankwinkel),
+                             bankwinkel=bankwinkel,
+                             steuertrieb_d=float(steuertrieb_d),
+                             wange_t=float(wange_t) or 18.0,
+                             hauptlager_b=float(hauptlager_b) or 26.0,
                              v8_kreuzebene=v8_kreuzebene)
     teile.extend(kw.koerper)
 
     # Einmal gebaut und dann kopiert: eine Ventilfeder zu bauen dauert
     # Sekunden, und ein V12 mit vier Ventilen braeuchte achtundvierzig.
+    auge_b = float(pleuel_auge_b) or round(pleuel_b * 0.75, 2)
     kolben_muster = kt_kolben.baue(bohrung=bohrung,
                                    kompressionshoehe=kompressionshoehe,
                                    bolzen_d=bolzen_d,
+                                   pleuel_b=round(auge_b + 0.5, 2),
+                                   schafthoehe=float(kolben_schafthoehe)
+                                   or 48.0,
+                                   boden_t=float(kolben_boden_t) or 7.0,
                                    ventiltaschen=list(ventiltaschen or []))
     pleuel_muster = kt_pleuel.baue(stichmass=l, hubzapfen_d=hubzapfen_d,
                                    bolzen_d=bolzen_d, breite=pleuel_b)
 
-    lagen = B.zylinderlagen(bauform, zylinderabstand, v8_kreuzebene)
-    versatz = B.hubzapfenversatz(bauform, v8_kreuzebene)
+    lagen = B.zylinderlagen(bauform, zylinderabstand, v8_kreuzebene,
+                            bankwinkel)
+    versatz = B.hubzapfenversatz(bauform, v8_kreuzebene, bankwinkel)
     zylinder_x = {}
 
     for nr, (seite, _x, bankwinkel, zapfen) in enumerate(lagen, 1):
         # Welchen Hubzapfen? Bei geteiltem Zapfen die Haelfte der Bank.
         name = "hubzapfen_%d" % (zapfen + 1)
-        if versatz and B.ist_v(bauform):
+        if versatz and B.ist_v(bauform, bankwinkel):
             name = "hubzapfen_%d%s" % (zapfen + 1, "a" if seite == 0 else "b")
         ziel = kw.punkt(name)
-        if B.ist_v(bauform) and not versatz:
+        if B.ist_v(bauform, bankwinkel) and not versatz:
             # Ungeteilter Zapfen: die beiden Baenke nebeneinander setzen.
             ziel = S.Punkt(ziel.name,
                            Vector(ziel.ort).add(Vector(
@@ -127,7 +152,24 @@ def selbsttest(bauform="V8"):
     """Baut einen Kurbeltrieb und misst die Zusagen nach."""
     import math
 
-    teile, proben, kw, zylinder_x = baue(bauform=bauform)
+    import kt_auslegung
+
+    # Aus der Tabelle bauen, nicht aus den Vorgabewerten dieser Funktion:
+    # ein V8 teilt seine Hubzapfen breiter, und dann reicht der
+    # Zylinderabstand von 1,18 x Bohrung nicht mehr.
+    aus = kt_auslegung.auslegen(bohrung=86.0, hub=86.0, bauform=bauform)
+    teile, proben, kw, zylinder_x = baue(
+        bauform=bauform, bohrung=aus["bohrung"], hub=aus["hub"],
+        stichmass=aus["stichmass"],
+        kompressionshoehe=aus["kompressionshoehe"],
+        zylinderabstand=aus["zylinderabstand"],
+        bolzen_d=aus["kolbenbolzen_d"], hubzapfen_d=aus["hubzapfen_d"],
+        hauptlager_d=aus["hauptlager_d"], pleuel_breite=aus["pleuel_breite"],
+        pleuel_auge_b=aus["pleuel_auge_b"],
+        steuertrieb_d=aus["steuertrieb_d"], wange_t=aus["wange_t"],
+        hauptlager_b=aus["hauptlager_b"],
+        kolben_schafthoehe=aus["kolben_schafthoehe"],
+        kolben_boden_t=aus["kolben_boden_t"])
     z, bank = B.daten(bauform)
     if len(zylinder_x) != z:
         raise AssertionError("%d Zylinder statt %d" % (len(zylinder_x), z))
@@ -148,7 +190,7 @@ def selbsttest(bauform="V8"):
     # also auf |y| = |z|. Das ist die Probe auf die Schubkurbel: mit einem
     # zur Zylinderachse parallelen Pleuel stimmt es nicht.
     if B.ist_v(bauform):
-        lagen = B.zylinderlagen(bauform, 101.5, True)
+        lagen = B.zylinderlagen(bauform, aus["zylinderabstand"], True)
         for nr, (seite, _x, bw, _zapfen) in enumerate(lagen, 1):
             k = [s for n, s in teile if n == "Kolben %d" % nr][0]
             b = k.BoundBox

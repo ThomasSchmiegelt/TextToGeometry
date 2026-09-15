@@ -39,9 +39,9 @@ def zapfenort(radius, winkel_grad):
 
 
 def kennwerte(bauform="R4", hub=86.0, zylinderabstand=91.0,
-              v8_kreuzebene=True, **_rest):
-    z, bank = B.daten(bauform)
-    n = B.zapfenzahl(bauform)
+              v8_kreuzebene=True, bankwinkel=0.0, **_rest):
+    z, bank = B.daten(bauform, bankwinkel)
+    n = B.zapfenzahl(bauform, bankwinkel)
     return {
         "bauform": str(bauform).upper(),
         "hub": float(hub),
@@ -49,7 +49,7 @@ def kennwerte(bauform="R4", hub=86.0, zylinderabstand=91.0,
         "hubzapfen": n,
         "hauptlager": n + 1,
         "zapfenwinkel": B.zapfenwinkel(bauform, v8_kreuzebene),
-        "versatz": B.hubzapfenversatz(bauform, v8_kreuzebene),
+        "versatz": B.hubzapfenversatz(bauform, v8_kreuzebene, bankwinkel),
         "laenge": round(n * float(zylinderabstand) + 2.0 * 30.0, 1),
     }
 
@@ -58,7 +58,7 @@ def baue(bauform="R4", hub=86.0, zylinderabstand=91.0, hauptlager_d=54.0,
          hubzapfen_d=48.0, hubzapfen_b=26.0, hauptlager_b=26.0, wange_t=18.0,
          wange_b=0.0, gegengewicht=True, flansch_d=110.0, flansch_t=12.0,
          steuertrieb_d=30.0, steuertrieb_l=30.0, v8_kreuzebene=True,
-         name="Kurbelwelle"):
+         bankwinkel=0.0, name="Kurbelwelle"):
     """Eine Kurbelwelle als :class:`Bauteil`.
 
     bauform          R2 … V12 (siehe :mod:`kt_bauformen`)
@@ -70,10 +70,25 @@ def baue(bauform="R4", hub=86.0, zylinderabstand=91.0, hauptlager_d=54.0,
     gegengewicht     Gegengewichte an den Wangen anformen
     """
     r = float(hub) / 2.0
-    n = B.zapfenzahl(bauform)
+    n = B.zapfenzahl(bauform, bankwinkel)
     winkel = B.zapfenwinkel(bauform, v8_kreuzebene)
-    versatz = B.hubzapfenversatz(bauform, v8_kreuzebene)
+    versatz = B.hubzapfenversatz(bauform, v8_kreuzebene, bankwinkel)
     abstand = float(zylinderabstand)
+    # Die Zapfenteilung war bisher Hauptlager + 2 Wangen + Hubzapfen, und
+    # der Zylinderabstand wurde nur gemeldet, nicht eingehalten: bei 100 mm
+    # Bohrung teilte die Welle mit 91,6 mm, der Kolben ist 99,9 mm breit.
+    # Was fehlt, kommt jetzt auf das Hauptlager — das ist auch konstruktiv
+    # die Stelle, an der ein Motor laenger wird.
+    lager_b = float(hauptlager_b)
+    mindest = lager_b + 2.0 * float(wange_t) + float(hubzapfen_b)
+    if abstand > mindest:
+        lager_b += abstand - mindest
+    elif abstand > 0.0 and abstand < mindest - 0.01:
+        raise ValueError(
+            "Zylinderabstand %.1f mm ist kleiner als die Zapfenteilung der "
+            "Welle (%.1f mm = Hauptlager %.1f + 2x Wange %.1f + Hubzapfen "
+            "%.1f)." % (abstand, mindest, float(hauptlager_b),
+                        float(wange_t), float(hubzapfen_b)))
     r_haupt = float(hauptlager_d) / 2.0
     r_hub = float(hubzapfen_d) / 2.0
     # Die Wange muss den Hubzapfen tragen, mehr nicht. Mit 6 mm Ueberstand
@@ -90,7 +105,7 @@ def baue(bauform="R4", hub=86.0, zylinderabstand=91.0, hauptlager_d=54.0,
 
     # Die Welle liegt entlang X. Zapfen k sitzt bei x = k * abstand.
     # Davor und dahinter je ein Hauptlager, dazwischen Wangen.
-    x = -float(hauptlager_b) - float(wange_t)
+    x = -lager_b - float(wange_t)
     anfang = x
 
     def wange(x0, phi):
@@ -129,19 +144,19 @@ def baue(bauform="R4", hub=86.0, zylinderabstand=91.0, hauptlager_d=54.0,
         phi = winkel[k]
         # Hauptlager vor dem Zapfen
         teile.append(("Hauptlager %d" % (k + 1),
-                      Part.makeCylinder(r_haupt, float(hauptlager_b),
+                      Part.makeCylinder(r_haupt, lager_b,
                                         Vector(x, 0, 0), Vector(1, 0, 0))))
         punkte.append(Punkt("hauptlager_%d" % (k + 1),
-                            (x + float(hauptlager_b) / 2.0, 0, 0), (1, 0, 0),
+                            (x + lager_b / 2.0, 0, 0), (1, 0, 0),
                             "welle", float(hauptlager_d),
                             "Hauptlagerzapfen %d" % (k + 1)))
-        x += float(hauptlager_b)
+        x += lager_b
         # Wange, Hubzapfen, Wange
         teile.append(("Wange %dA" % (k + 1), wange(x, phi)))
         x += float(wange_t)
         _dx, y, z = zapfenort(r, phi)
         zapfen_x = x
-        if versatz and B.ist_v(bauform):
+        if versatz and B.ist_v(bauform, bankwinkel):
             # Gesplitteter Hubzapfen: zwei Haelften, um den Versatz verdreht.
             halbe = float(hubzapfen_b) / 2.0
             for teil, (px, pw, kuerzel) in enumerate(
@@ -178,13 +193,13 @@ def baue(bauform="R4", hub=86.0, zylinderabstand=91.0, hauptlager_d=54.0,
 
     # Letztes Hauptlager
     teile.append(("Hauptlager %d" % (n + 1),
-                  Part.makeCylinder(r_haupt, float(hauptlager_b),
+                  Part.makeCylinder(r_haupt, lager_b,
                                     Vector(x, 0, 0), Vector(1, 0, 0))))
     punkte.append(Punkt("hauptlager_%d" % (n + 1),
-                        (x + float(hauptlager_b) / 2.0, 0, 0), (1, 0, 0),
+                        (x + lager_b / 2.0, 0, 0), (1, 0, 0),
                         "welle", float(hauptlager_d),
                         "Hauptlagerzapfen %d" % (n + 1)))
-    x += float(hauptlager_b)
+    x += lager_b
 
     # Schwungradflansch hinten
     teile.append(("Flansch", Part.makeCylinder(
@@ -210,7 +225,7 @@ def baue(bauform="R4", hub=86.0, zylinderabstand=91.0, hauptlager_d=54.0,
 
     bt = Bauteil(name, koerper=[(name, ganz)], punkte=punkte,
                  kennwerte=kennwerte(bauform, hub, zylinderabstand,
-                                     v8_kreuzebene))
+                                     v8_kreuzebene, bankwinkel))
     bt.kennwerte["laenge"] = round(x + float(flansch_t)
                                    - (anfang - float(steuertrieb_l)), 1)
     bt.kennwerte["zylinderabstand"] = abstand
@@ -264,6 +279,24 @@ def selbsttest():
     wa = math.degrees(math.atan2(-a.ort.y, a.ort.z)) % 360.0
     wb = math.degrees(math.atan2(-bb.ort.y, bb.ort.z)) % 360.0
     delta = (wb - wa) % 360.0
+    # Die Zapfenteilung MUSS der Zylinderabstand sein — sonst stehen die
+    # Kolben enger als der Block.
+    for abst in (88.0, 101.5, 141.6):
+        t2 = baue(bauform="R4", zylinderabstand=abst)
+        xs = sorted(t2.punkt("hubzapfen_%d" % (i + 1)).ort.x
+                    for i in range(4))
+        teilung = [round(b - a, 2) for a, b in zip(xs, xs[1:])]
+        if max(teilung) - min(teilung) > 0.01 or abs(teilung[0] - abst) > 0.01:
+            raise AssertionError(
+                "Zapfenteilung %s statt %.1f mm — die Welle haelt den "
+                "Zylinderabstand nicht ein" % (teilung, abst))
+    # Ein zu kleiner Abstand muss auffallen statt still zu wachsen.
+    try:
+        baue(bauform="R4", zylinderabstand=40.0)
+        raise AssertionError("zu kleiner Zylinderabstand blieb unbemerkt")
+    except ValueError:
+        pass
+
     if abs(delta - B.hubzapfenversatz("V6")) > 0.01:
         raise AssertionError("V6: Zapfenhaelften %.1f Grad auseinander, "
                              "erwartet %.1f" % (delta,

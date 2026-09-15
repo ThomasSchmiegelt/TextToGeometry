@@ -28,7 +28,7 @@ python3 test_agent.py   # 24 tests: agent protocol, action registry, run budget
 FreeCADCmd test_skills.py   # skills engine — needs the REAL Part module (see gotcha)
 FreeCADCmd test_bauen.py    # 32 checks: placement, replace, collisions, bearing, tools
 FreeCADCmd test_getriebe_makro.py  # 32 checks: mask, DIN 625, housing, FCGear
-FreeCADCmd test_kurbeltrieb.py     # 40 checks: parts, docking, R2…V12 (T2G_TEST_LANG=1 for all ten)
+FreeCADCmd test_kurbeltrieb.py     # 50 checks: parts, docking, R2…V12 (T2G_TEST_LANG=1 for all ten)
 FreeCADCmd Beispiele/getriebe_5gang.py   # reference gearbox; exits 1 if a promise breaks
 FreeCADCmd test_bauen.py    # 24 checks: placement, replace, collisions, bearing, mesh phase
 FreeCADCmd Beispiele/getriebe_5gang.py   # reference gearbox; exits 1 if a promise breaks
@@ -407,16 +407,19 @@ this workbench.
 
 ### The crank-drive generator: interfaces, not coordinates
 
-`Tools/kt_*.py` — one script per part, as asked, in four layers, each with its
-own `selbsttest()` so a breakage names its own level:
+`Skills/Verbrennungsmotor/` — one script per part, in four layers, each with
+its own `selbsttest()` so a breakage names its own level:
 
 ```
+Verbrennungsmotor  the skill entry: T2G_SKILL + build(params)
 kt_schnittstelle   Punkt / Bauteil / andocke / richte / pruefe_paarung
 kt_bauformen       R2…V12: pin angles, firing orders (tables, not formulas)
 kt_kinematik       slider-crank, cam lift, block height, bank offset — maths only
+kt_auslegung       THE table of shared dimensions (see below)
   ↓
-kt_kolben  kt_pleuel  kt_kurbelwelle  kt_ventil  kt_ventilfeder
-kt_stoessel  kt_nockenwelle  kt_steuertrieb          — one part each
+kt_kolben  kt_pleuel  kt_kurbelwelle  kt_einlassventil  kt_auslassventil
+kt_ventilfeder  kt_stoessel  kt_nockenwelle  kt_steuertrieb   — one part each
+(kt_ventil is the shared blank of the two valves, not a part of the engine)
   ↓
 kt_kurbeltrieb     crankshaft + rods + pistons
 kt_ventiltrieb     valves, springs, tappets, camshafts, timing drive
@@ -428,6 +431,77 @@ kt_motor           kennwerte / baue / pruefe, plus the gearbox on the flange
 calls the two assemblies and measures the result. That split is what lets
 `kt_kinematik.selbsttest()` check the slider-crank against known values (TDC 0,
 BDC 2·r, full cam lift at 180°) without building a single solid.
+
+**A skill may be a folder of many files.** `load_skill_file()` builds the
+namespace with `_sibling_import(skill_dir)`, which admits `math`, `Part`,
+`FreeCAD` *and* any `.py` sitting next to the skill's own entry file. Say
+what that widens: a sibling imported this way runs with the normal builtins,
+so a multi-file skill is trusted code like the add-on itself. It is not a new
+hole on the LLM path — `create_skill()` writes a single file and can never
+put a sibling beside it. `T2GCommand._MakroCommand.SKILL_PFADE` lists the
+folders that also go on `sys.path` for the workbench commands.
+
+**`kt_auslegung` is the one place a shared dimension lives.** The piston pin
+diameter appears in the piston *and* in the small rod eye; the crank pin in
+the crankshaft *and* in the big eye; the crank nose in the crankshaft *and*
+in the sprocket. While each script carried its own default, it fitted at
+86 mm bore by coincidence and nowhere else. `auslegen(bohrung, hub, bauform)`
+derives every shared dimension from the bore (stroke for the rod length), and
+`kt_motor` hands the same entry to both sides. At 86 mm it reproduces exactly
+the values this generator was measured with (pin 22, crank pin 48, main
+bearing 54, compression height 32) — the gain is that they now scale.
+
+Its `pruefe()` found two real errors the moment it existed, both invisible at
+86 mm: the inline crank pin was a fixed 26 mm while a 120 mm-bore rod is
+30.7 mm wide, and the piston's slot for the small eye was a fixed 17 mm while
+the eye follows the rod width. Anything overriding an entry must pass a real
+value — `0.0` means "not given", and a blunt `update()` once wrote a pin
+diameter of zero into the table.
+
+**Intake and exhaust valve are two different parts**, and not only in size.
+The exhaust valve is the hot one: smaller head (0.31·D against 0.36·D),
+*thicker* stem (0.080·D against 0.070·D — measured against the bore, since
+measuring against its own smaller head would invert the comparison), a tulip
+transition instead of a straight cone, and a closed, sodium-filled hollow
+stem. That cavity is a second shell inside one solid, and `removeSplitter()`
+leaves it intact (measured: 1 solid, 2 shells, 6832 against 9050 mm³). The
+chain stays *one* part although it is seventy rollers — its links are all
+alike and its promise is the path, not the link.
+
+Because the two stems differ, the valve train builds **one tappet pattern per
+valve type**: with a single pattern the pairing check correctly reported
+"Kennmass 6.9 gegen 6.0 mm".
+
+**The bank angle is free.** `daten(bauform, bankwinkel)` overrides the table
+value — a V6 exists at 60°, 90° and 55° — and it carries all the way through,
+because the split-pin offset is `|720/z − bank|`: a 90° V6 gets 30°, a 60° V6
+gets 60°, and V8/90, V10/72, V12/60 need none because their bank angle
+equals their firing interval.
+
+Sweeping all ten layouts × 2/4 valves × chain/gear × bank angle 60…120° ×
+valve angle 0…28° × bore 70…120 mm found four more of the same kind — two
+places computing one dimension differently, invisible at the default size:
+
+- **The crankshaft ignored the cylinder spacing.** Its pin pitch was
+  `hauptlager_b + 2·wange_t + hubzapfen_b` — 88 mm at 86 mm bore, where the
+  piston is 85.9 mm wide, so it fitted by 2 mm. At 100 mm bore the pitch is
+  91.6 mm and the piston 99.9: pistons 2 and 3 overlapped by 4.6 %, at
+  120 mm by 14 %. The crank now stretches its main journals to hold the
+  given spacing and refuses a spacing below its own minimum; `kt_auslegung`
+  raises the spacing to that minimum, which is why a V8 at 86 mm bore now
+  spaces its cylinders 110 mm apart, not 101.5 — two rods share one pin.
+- **The chain pitch must suit the head.** A 40-tooth 3/8" cam sprocket is
+  121 mm across. At 12° valve angle the two camshafts of an R4 stand 118 mm
+  apart, at 6° only 78, at 0° only 37 — the sprockets overlapped by 51.9 %.
+  `teilung_fuer(z, abstand)` picks the largest standard pitch (12.7 … 4.762)
+  whose root circle still fits, and the roller diameter follows the pitch. At
+  0° nothing fits, and that is the truth: a DOHC head with parallel valves
+  cannot have one chain round both cams. It says so instead of building
+  interpenetrating wheels.
+- **Valve pockets must follow the valve angle**: a tilted valve's head walks
+  `lift·sin(angle)` sideways, and at 28° it ran into the piston beside its
+  own pocket (3.7 %).
+- **One tappet pattern for two stem diameters** — see above.
 
 The point of the whole thing is `kt_schnittstelle.py`: every part returns its
 bodies **and** its connection points (position, axis, kind, size), and the

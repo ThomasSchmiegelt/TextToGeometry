@@ -31,6 +31,7 @@ import math
 import FreeCAD
 from FreeCAD import Vector
 
+import kt_auslegung
 import kt_bauformen as B
 import kt_kinematik as K
 import kt_kurbeltrieb
@@ -52,33 +53,60 @@ def blockhoehe(hub, stichmass, kompressionshoehe):
     return K.blockhoehe(hub, stichmass, kompressionshoehe)
 
 
+def auslegung(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
+              kompressionshoehe=0.0, zylinderabstand=0.0, bolzen_d=0.0,
+              hubzapfen_d=0.0, hauptlager_d=0.0, pleuel_breite=0.0,
+              ventilhub=0.0, ventile_je_zylinder=4, v8_kreuzebene=True,
+              bankwinkel=0.0):
+    """Die Maßtabelle dieses Motors (``kt_auslegung.auslegen``).
+
+    Alles, was 0 ist, kommt aus den Verhältnissen der Bohrung — alles
+    andere überschreibt sie. Damit steht jedes geteilte Maß genau einmal:
+    Kolben und Pleuel bekommen denselben Bolzendurchmesser, Kurbelwelle und
+    Pleuel denselben Hubzapfen, und das bleibt auch bei 120 mm Bohrung so.
+    """
+    return kt_auslegung.auslegen(
+        bohrung=bohrung, hub=hub, bauform=bauform,
+        ventile_je_zylinder=ventile_je_zylinder,
+        v8_kreuzebene=v8_kreuzebene, bankwinkel=bankwinkel,
+        stichmass=float(stichmass), zylinderabstand=float(zylinderabstand),
+        kompressionshoehe=float(kompressionshoehe),
+        kolbenbolzen_d=float(bolzen_d), hubzapfen_d=float(hubzapfen_d),
+        hauptlager_d=float(hauptlager_d),
+        pleuel_breite=float(pleuel_breite), ventilhub=float(ventilhub))
+
+
 def kennwerte(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
-              kompressionshoehe=32.0, zylinderabstand=0.0,
+              kompressionshoehe=0.0, zylinderabstand=0.0,
               ventile_je_zylinder=4, v8_kreuzebene=True,
-              pleuel_breite=22.0, **_rest):
+              pleuel_breite=0.0, bankwinkel=0.0, **_rest):
     """Die Auslegung auf einen Blick, ohne Geometrie."""
-    l = float(stichmass) or kt_pleuel.stichmass_aus_hub(hub)
-    za = float(zylinderabstand) or round(float(bohrung) * 1.18, 1)
-    k = B.kennwerte(bauform, bohrung, hub, v8_kreuzebene)
+    a = auslegung(bauform, bohrung, hub, stichmass, kompressionshoehe,
+                  zylinderabstand, pleuel_breite=pleuel_breite,
+                  ventile_je_zylinder=ventile_je_zylinder,
+                  v8_kreuzebene=v8_kreuzebene, bankwinkel=bankwinkel)
+    l = a["stichmass"]
+    k = B.kennwerte(bauform, bohrung, hub, v8_kreuzebene, bankwinkel)
     k.update({
         "bohrung": float(bohrung),
         "hub": float(hub),
         "stichmass": l,
-        "lambda": round((float(hub) / 2.0) / l, 4),
-        "kompressionshoehe": float(kompressionshoehe),
-        "blockhoehe": round(blockhoehe(hub, l, kompressionshoehe), 2),
-        "zylinderabstand": za,
+        "lambda": a["lambda"],
+        "kompressionshoehe": a["kompressionshoehe"],
+        "blockhoehe": a["blockhoehe"],
+        "zylinderabstand": a["zylinderabstand"],
+        "auslegung": a,
         "ventile_je_zylinder": int(ventile_je_zylinder),
         "ventile_gesamt": int(ventile_je_zylinder) * k["zylinder"],
         # Bankversatz: beim V-Motor sitzen die beiden Pleuel NEBENEINANDER
         # auf demselben Hubzapfen, die Zylinderbaenke stehen deshalb um eine
         # Pleuelbreite gegeneinander versetzt. Das ist kein Schoenheitsfehler,
         # sondern folgt zwingend aus dem geteilten Zapfen.
-        "bankversatz": K.bankversatz(bauform, pleuel_breite,
-                                     v8_kreuzebene),
-        "nockenwellen": 2 if B.ist_v(bauform) else 1,
+        "bankversatz": K.bankversatz(bauform, a["pleuel_breite"],
+                                     v8_kreuzebene, bankwinkel),
+        "nockenwellen": 2 if B.ist_v(bauform, bankwinkel) else 1,
     })
-    if B.ist_v(bauform):
+    if B.ist_v(bauform, bankwinkel):
         k["nockenwellen"] = 4 if int(ventile_je_zylinder) >= 4 else 2
     else:
         k["nockenwellen"] = 2 if int(ventile_je_zylinder) >= 4 else 1
@@ -86,21 +114,27 @@ def kennwerte(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
 
 
 def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
-         kompressionshoehe=32.0, zylinderabstand=0.0, bolzen_d=22.0,
-         hubzapfen_d=48.0, hauptlager_d=54.0, ventile_je_zylinder=4,
-         ventilhub=10.0, steuertrieb="kette", zaehne_kurbel=20,
-         spreizung=110.0, ventilwinkel=12.0, pleuel_breite=22.0,
-         v8_kreuzebene=True, mit_ventiltrieb=True, mit_getriebe=False,
-         getriebe_gaenge=5, doc=None):
+         kompressionshoehe=0.0, zylinderabstand=0.0, bolzen_d=0.0,
+         hubzapfen_d=0.0, hauptlager_d=0.0, ventile_je_zylinder=4,
+         ventilhub=0.0, steuertrieb="kette", zaehne_kurbel=20,
+         spreizung=110.0, ventilwinkel=12.0, pleuel_breite=0.0,
+         bankwinkel=0.0, v8_kreuzebene=True, mit_ventiltrieb=True,
+         mit_getriebe=False, getriebe_gaenge=5, doc=None):
     """Ein vollständiger Motor als Liste von (Bezeichnung, Shape).
 
     bauform             R2 … V12
     bohrung, hub        [mm]
-    stichmass           0 = aus dem Hub vorschlagen (1,75·Hub)
-    kompressionshoehe   Kolbenbolzenmitte bis Kolbenboden [mm]
+    Alle Maße, die 0 sind, kommen aus ``kt_auslegung`` — der Tabelle der
+    übergreifenden Maße. Dort steht jedes geteilte Maß genau einmal, und
+    beide Seiten einer Paarung lesen denselben Eintrag. Was hier gesetzt
+    wird, überschreibt die Tabelle, und das Abhängige rechnet mit.
+
+    stichmass           0 = aus dem Hub (1,75·Hub)
+    kompressionshoehe   Kolbenbolzenmitte bis Kolbenboden [mm], 0 = Tabelle
     zylinderabstand     0 = 1,18 · Bohrung
+    bolzen_d, hubzapfen_d, hauptlager_d, pleuel_breite   0 = Tabelle
     ventile_je_zylinder 2 oder 4
-    ventilhub           Nockenerhebung [mm]
+    ventilhub           Nockenerhebung [mm], 0 = Tabelle
     steuertrieb         "kette" oder "zahnrad"
     spreizung           Lage des Nockenscheitels nach OT [Grad Kurbelwinkel],
                         üblich 100…115
@@ -109,6 +143,10 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
                         Brennraums — und der Grund, warum die beiden
                         Nockenwellen nebeneinander Platz haben statt
                         ineinanderzustehen.
+    bankwinkel          Bankwinkel des V-Motors [Grad]; 0 = der übliche
+                        Wert der Bauform. Einen V6 gibt es mit 60 und mit
+                        90 Grad, und der Hubzapfenversatz folgt daraus
+                        (|720/z − bank|): 90-Grad-V6 → 30 Grad Versatz.
     mit_ventiltrieb     False baut nur Kurbelwelle, Pleuel und Kolben
     mit_getriebe        True flanscht das Getriebe aus getriebe_fcgear an
                         den Schwungradflansch — beide laufen in der
@@ -116,9 +154,19 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
     """
     k = kennwerte(bauform, bohrung, hub, stichmass, kompressionshoehe,
                   zylinderabstand, ventile_je_zylinder, v8_kreuzebene,
-                  pleuel_breite)
-    l = k["stichmass"]
-    za = k["zylinderabstand"]
+                  pleuel_breite, bankwinkel)
+    # EINE Quelle fuer jedes geteilte Mass. Was der Aufrufer nicht setzt,
+    # kommt aus den Verhaeltnissen der Bohrung; was er setzt, ueberschreibt
+    # sie — und beide Seiten einer Paarung lesen denselben Eintrag.
+    a = k["auslegung"]
+    schlecht = [t for ok, t in kt_auslegung.pruefe(a) if not ok]
+    if schlecht:
+        raise MotorFehler("Die Auslegung passt nicht zusammen: "
+                          + "; ".join(schlecht))
+    l = a["stichmass"]
+    za = a["zylinderabstand"]
+    hub_v = a["ventilhub"] if not float(ventilhub) else float(ventilhub)
+    a["ventilhub"] = hub_v
     doc = doc or FreeCAD.ActiveDocument or FreeCAD.newDocument("Motor")
 
     # Die Ventiltaschen muessen im Kolben stehen, bevor er gebaut wird —
@@ -126,27 +174,44 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
     # Kinematik sie vorweg, ohne dass ein Ventil existieren muss.
     taschen = []
     if mit_ventiltrieb:
-        tiefe = K.taschentiefe(bauform, hub, l, za, ventilhub, spreizung,
-                               kt_ventiltrieb.GRUNDKREIS_R, v8_kreuzebene)
+        tiefe = K.taschentiefe(bauform, hub, l, za, hub_v, spreizung,
+                               a["nocken_grundkreis_d"] / 2.0, v8_kreuzebene,
+                               bankwinkel=bankwinkel)
+        # KEIN Zuschlag fuer die untere Tellerkante des geneigten Ventils.
+        # Rechnerisch waere er der halbe Teller mal sin(Winkel) — bei 12
+        # Grad 3,2 mm, bei 28 Grad 6,3. Nachgemessen nimmt die Tasche damit
+        # 23 bis 30 % des Kolbens statt 12, und sie wird 8 bis 12 mm tief;
+        # ueblich sind 2 bis 4. Der Grund ist, dass die Tasche hier ein
+        # gerader Zylinder ist: die schraege Tellerkante braucht eine
+        # Tasche SENKRECHT ZUR VENTILACHSE, nicht eine tiefere gerade.
+        # Solange sie gerade ist, bleibt bei grossem Ventilwinkel ein Rest
+        # (gemessen 3,7 % bei 28 Grad) — das ist der naechste Schritt beim
+        # Detaillieren, nicht ein Fall fuer eine tiefere Tasche.
         taschen = kt_ventiltrieb.ventiltaschen(bohrung, ventile_je_zylinder,
-                                               tiefe)
+                                               tiefe, ventilwinkel, hub_v)
         k["taschentiefe"] = tiefe
 
     teile, proben, kw, zylinder_x = kt_kurbeltrieb.baue(
         bauform=bauform, bohrung=bohrung, hub=hub, stichmass=l,
-        kompressionshoehe=kompressionshoehe, zylinderabstand=za,
-        bolzen_d=bolzen_d, hubzapfen_d=hubzapfen_d,
-        hauptlager_d=hauptlager_d, pleuel_breite=pleuel_breite,
+        kompressionshoehe=a["kompressionshoehe"], zylinderabstand=za,
+        bolzen_d=a["kolbenbolzen_d"], hubzapfen_d=a["hubzapfen_d"],
+        hauptlager_d=a["hauptlager_d"], pleuel_breite=a["pleuel_breite"],
+        steuertrieb_d=a["steuertrieb_d"], pleuel_auge_b=a["pleuel_auge_b"],
+        wange_t=a["wange_t"], hauptlager_b=a["hauptlager_b"],
+        kolben_schafthoehe=a["kolben_schafthoehe"],
+        kolben_boden_t=a["kolben_boden_t"],
+        bankwinkel=bankwinkel,
         v8_kreuzebene=v8_kreuzebene, ventiltaschen=taschen)
 
     if mit_ventiltrieb:
         vt_teile, vt_proben, vt_kenn = kt_ventiltrieb.baue(
             bauform=bauform, bohrung=bohrung, blockhoehe=k["blockhoehe"],
             zylinder_x=zylinder_x, zylinderabstand=za,
-            ventile_je_zylinder=ventile_je_zylinder, ventilhub=ventilhub,
+            ventile_je_zylinder=ventile_je_zylinder, ventilhub=hub_v,
             spreizung=spreizung, ventilwinkel=ventilwinkel,
             steuertrieb=steuertrieb, zaehne_kurbel=zaehne_kurbel,
-            kurbelnase=kw.punkt("steuertrieb"),
+            kurbelnase=kw.punkt("steuertrieb"), auslegung=a,
+            bankwinkel=bankwinkel,
             v8_kreuzebene=v8_kreuzebene, doc=doc)
         teile.extend(vt_teile)
         proben.extend(vt_proben)

@@ -24,3 +24,6 @@ TextToGeometry*.zip
 
 # persoenliches Hilfsskript
 restart.sh
+
+# Ausgabe der Testlaeufe
+getriebe_bau.txt

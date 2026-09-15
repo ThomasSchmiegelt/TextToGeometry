@@ -53,11 +53,21 @@ def baue(bohrung=86.0, kompressionshoehe=32.0, bolzen_d=22.0,
     ringe              Zahl der Kolbenringe
     pleuel_b           Breite des kleinen Pleuelauges [mm] — dafür bleibt
                        zwischen den Bolzennaben ein Schlitz frei
-    ventiltaschen      Liste von (x, y, d, tiefe) im Kolbenkoordinatensystem:
-                       Mulden im Boden, damit die Ventile bei der
-                       Überschneidung am oberen Totpunkt nicht anschlagen.
-                       Ohne sie durchdringen sich Kolben und Ventil — real
-                       ist genau das der Grund, warum es Ventiltaschen gibt.
+    ventiltaschen      Liste von ``(x, y, d, tiefe)`` oder
+                       ``(x, y, d, tiefe, neigung)`` im
+                       Kolbenkoordinatensystem: Mulden im Boden, damit die
+                       Ventile bei der Überschneidung am oberen Totpunkt
+                       nicht anschlagen. Ohne sie durchdringen sich Kolben
+                       und Ventil — real ist genau das der Grund, warum es
+                       Ventiltaschen gibt.
+
+                       ``neigung`` [Grad] kippt die Mulde um die lokale
+                       Y-Achse, **senkrecht zur Ventilachse**. Ein geneigtes
+                       Ventil taucht mit seiner unteren Tellerkante schräg
+                       ein; eine gerade Mulde müsste dafür so tief werden,
+                       dass sie ein Drittel des Kolbens wegnimmt (gemessen
+                       30 % bei 28 Grad Ventilwinkel). Gekippt bleibt sie
+                       bei den üblichen 2…5 mm.
     """
     d = float(bohrung) - float(laufspiel)
     r = d / 2.0
@@ -105,12 +115,37 @@ def baue(bohrung=86.0, kompressionshoehe=32.0, bolzen_d=22.0,
 
     # Ventiltaschen im Boden.
     for tasche in (ventiltaschen or []):
-        tx, ty, td, tt = (float(v) for v in tasche)
+        werte = [float(v) for v in tasche]
+        tx, ty, td, tt = werte[:4]
+        neigung = werte[4] if len(werte) > 4 else 0.0
         if td <= 0.0 or tt <= 0.0:
             continue
-        mulde = Part.makeCylinder(td / 2.0, tt + 1.0,
+        mulde = Part.makeCylinder(td / 2.0, tt + 6.0,
                                   Vector(tx, ty, kh - tt))
-        koerper = koerper.cut(mulde)
+        if abs(neigung) > 1e-9:
+            # Um die lokale Y-Achse kippen, Drehpunkt in der Muldenmitte an
+            # der Kolbenoberkante: dort sitzt das Ventil, und dort soll die
+            # Mulde bleiben, wenn sie sich neigt.
+            # Placement(Base, Rotation, Center): der DRITTE Wert ist der
+            # Drehpunkt, der erste eine zusaetzliche Verschiebung. Beide
+            # belegt, flog die Mulde aus dem Kolben heraus und nahm nichts
+            # mehr weg.
+            mulde.Placement = FreeCAD.Placement(
+                Vector(0, 0, 0),
+                FreeCAD.Rotation(Vector(0, 1, 0), float(neigung)),
+                Vector(tx, ty, kh)).multiply(mulde.Placement)
+        # KEIN common() zum Beschneiden: gegen einen Zylinder verschnitten
+        # kam ein leerer Koerper zurueck, und die Mulde nahm gar nichts mehr
+        # weg (gemessen: Kolben unveraendert, Ventil 21 % im Material).
+        # Sie ragt stattdessen oben heraus, wo ohnehin nichts ist.
+        vorher = koerper.Volume
+        geschnitten = koerper.cut(mulde)
+        if geschnitten.Volume < vorher - 1.0:
+            koerper = geschnitten
+        else:
+            raise ValueError(
+                "Die Ventiltasche bei (%.1f, %.1f) nimmt kein Material weg "
+                "— dann sitzt sie neben dem Kolbenboden." % (tx, ty))
 
     # Bolzenbohrung quer durch.
     koerper = koerper.cut(Part.makeCylinder(bd / 2.0, d + 4.0,

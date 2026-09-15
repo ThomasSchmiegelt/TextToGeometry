@@ -114,7 +114,8 @@ def nockenhub(winkel_grad, hub, grundkreis_r=16.0, flanke=60.0,
     return max(0.0, groesste - rg)
 
 
-def bankversatz(bauform, pleuel_breite, v8_kreuzebene=True):
+def bankversatz(bauform, pleuel_breite, v8_kreuzebene=True,
+                bankwinkel=0.0):
     """Axialer Versatz der zweiten Zylinderbank [mm].
 
     Beim V-Motor sitzen die beiden Pleuel nebeneinander auf demselben
@@ -125,10 +126,10 @@ def bankversatz(bauform, pleuel_breite, v8_kreuzebene=True):
     * geteilter Zapfen: um eine halbe Zapfenbreite, denn die beiden Hälften
       liegen selbst schon hintereinander (V4, V6) — gemessen 24 statt 22 mm
     """
-    if not B.ist_v(bauform):
+    if not B.ist_v(bauform, bankwinkel):
         return 0.0
     b = float(pleuel_breite)
-    if B.hubzapfenversatz(bauform, v8_kreuzebene):
+    if B.hubzapfenversatz(bauform, v8_kreuzebene, bankwinkel):
         return (2.0 * b + 4.0) / 2.0
     return b
 
@@ -148,7 +149,7 @@ def nockenwinkel(kurbelwinkel_grad, spreizung, art):
 
 def taschentiefe(bauform, hub, stichmass, zylinderabstand, ventilhub,
                  spreizung=110.0, grundkreis_r=16.0, v8_kreuzebene=True,
-                 luft=1.5):
+                 luft=1.5, bankwinkel=0.0):
     """Nötige Tiefe der Ventiltaschen im Kolbenboden [mm].
 
     Nicht der volle Ventilhub bestimmt sie, sondern der **Überstand des
@@ -159,8 +160,9 @@ def taschentiefe(bauform, hub, stichmass, zylinderabstand, ventilhub,
     Gerechnet wird über alle Zylinder und beide Ventilsorten, damit eine
     Tiefe für alle Kolben reicht.
     """
-    lagen = B.zylinderlagen(bauform, zylinderabstand, v8_kreuzebene)
-    versatz = B.hubzapfenversatz(bauform, v8_kreuzebene)
+    lagen = B.zylinderlagen(bauform, zylinderabstand, v8_kreuzebene,
+                            bankwinkel)
+    versatz = B.hubzapfenversatz(bauform, v8_kreuzebene, bankwinkel)
     winkel = B.zapfenwinkel(bauform, v8_kreuzebene)
     noetig = 0.0
     for seite, _x, _bw, zapfen in lagen:

@@ -41,6 +41,12 @@ from kt_schnittstelle import Bauteil, Punkt
 #: Bauarten, die die Maske anbietet.
 ARTEN = ("zahnrad", "kette")
 
+#: Genormte Kettenteilungen [mm], von grob nach fein: 1/2", 3/8", 8 mm,
+#: 1/4", 3/16". Steuerketten sind die feinen — je feiner die Teilung, desto
+#: kleiner das Rad bei gleicher Zähnezahl, und darauf kommt es an, wenn zwei
+#: Nockenwellen dicht nebeneinander liegen.
+TEILUNGEN = (12.7, 9.525, 8.0, 6.35, 4.762)
+
 
 class SteuertriebFehler(Exception):
     pass
@@ -64,6 +70,69 @@ def kennwerte(art="kette", zaehne_kurbel=20, modul=3.0, teilung=9.525,
         "uebersetzung": round(z2 / float(z1), 4),
         "achsabstand": round(a, 2),
     }
+
+
+def auslegen_kette(zaehne_kurbel, abstand, kurbel_d=30.0, nocken_d=26.0,
+                   luft=4.0, wand=3.0, teilungen=TEILUNGEN):
+    """Kettenteilung, mit der ein 2:1-Trieb wirklich baubar ist.
+
+    Zwei Bedingungen, und sie ziehen gegeneinander:
+
+    * Das **Nockenrad** (doppelte Zähnezahl) darf nicht breiter sein als der
+      Abstand zur Nachbarwelle — sonst stecken die beiden Räder eines
+      DOHC-Kopfes ineinander.
+    * Jedes Rad braucht Platz für **seine Bohrung**: Fußkreis ≥ Zapfen +
+      2 · Wand. Ein zu kleines Kurbelrad verschwindet in seiner eigenen
+      Bohrung — gemessen wurde genau das, `cut()` lieferte einen leeren
+      Körper und die Kollisionsprüfung brach mit "Invalid bounding box" ab.
+
+    Da das Nockenrad doppelt so viele Zähne hat, ist es rund doppelt so groß
+    wie das Kurbelrad. Der Wellenabstand muss also mindestens etwa das
+    Doppelte des Kurbelzapfens plus Wand betragen — das ist die harte Grenze
+    eines Kettentriebs über beide Nockenwellen, keine Frage der Teilung.
+
+    Liefert die größte passende Normteilung oder ``None``.
+    """
+    z1 = max(9, int(zaehne_kurbel))
+    z2 = 2 * z1
+    platz = float(abstand) - float(luft)
+    for p in sorted(teilungen, reverse=True):
+        d1, _ = kettenradmasse(z1, p)
+        d2, _ = kettenradmasse(z2, p)
+        rollen = p * 2.0 / 3.0
+        if d2 - rollen > platz:
+            continue                       # Nockenraeder stossen zusammen
+        if d1 - rollen < float(kurbel_d) + 2.0 * float(wand):
+            continue                       # Kurbelrad kleiner als sein Zapfen
+        if d2 - rollen < float(nocken_d) + 2.0 * float(wand):
+            continue
+        return p
+    return None
+
+
+def teilung_fuer(zaehne, abstand, luft=4.0, teilungen=TEILUNGEN):
+    """Größte Normteilung, deren Rad noch in den Achsabstand passt.
+
+    Zwei Kettenräder auf benachbarten Wellen dürfen sich nicht überschneiden:
+    ihre Fußkreise müssen zusammen unter den Achsabstand passen. Das ist bei
+    einem DOHC-Kopf die eigentliche Auslegungsfrage — die beiden Nockenwellen
+    liegen bei kleinem Ventilwinkel dicht beieinander.
+
+    Gemessen an einem R4 mit 86 mm Bohrung: bei 12° Ventilwinkel stehen die
+    Wellen 118 mm auseinander, bei 6° nur 78 mm, bei 0° gar 37 mm. Ein
+    40-zähniges 3/8"-Rad ist 121 mm groß und passt nur in den ersten Fall.
+
+    Liefert ``None``, wenn keine Teilung reicht — dann ist an dieser Stelle
+    kein Kettentrieb zu bauen, und das soll man erfahren, statt Räder zu
+    bekommen, die ineinanderstecken.
+    """
+    z = max(9, int(zaehne))
+    platz = float(abstand) - float(luft)
+    for p in sorted(teilungen, reverse=True):
+        d, _da = kettenradmasse(z, p)
+        if d - p <= platz:      # Fusskreis = Teilkreis - Rollendurchmesser
+            return p
+    return None
 
 
 def kettenradmasse(zaehne, teilung):
@@ -125,7 +194,7 @@ def _zahnrad(doc, zaehne, modul, breite, bohrung):
 
 def baue(art="kette", zaehne_kurbel=20, modul=3.0, teilung=9.525,
          breite=12.0, achsabstand=0.0, kurbel_d=30.0, nocken_d=26.0,
-         rollen_d=6.35, nocken_lagen=None, doc=None, name="Steuertrieb"):
+         rollen_d=0.0, nocken_lagen=None, doc=None, name="Steuertrieb"):
     """Steuertrieb als :class:`Bauteil`.
 
     art            "zahnrad" oder "kette"
@@ -144,6 +213,10 @@ def baue(art="kette", zaehne_kurbel=20, modul=3.0, teilung=9.525,
                                 % (art, ", ".join(ARTEN)))
     z1 = max(9, int(zaehne_kurbel))
     z2 = 2 * z1
+    # Die Rolle gehoert zur Teilung: 6,35 mm ist die Rolle einer 3/8"-Kette.
+    # Mit einer feineren Teilung muss sie mitschrumpfen, sonst fressen die
+    # Rollen den Zahn auf.
+    rollen_d = float(rollen_d) or round(float(teilung) * 2.0 / 3.0, 3)
     k = kennwerte(art, z1, modul, teilung, achsabstand)
     a = k["achsabstand"]
     teile = []
@@ -189,6 +262,12 @@ def baue(art="kette", zaehne_kurbel=20, modul=3.0, teilung=9.525,
             # Ohne Bohrung steckt das Rad auf der Welle statt auf ihr zu
             # sitzen — gemessen 30,3 % Durchdringung mit der Kurbelwelle.
             if bohrung > 0.0:
+                if (d - float(rollen_d)) <= bohrung + 2.0:
+                    raise SteuertriebFehler(
+                        "%s: Fusskreis %.1f mm ist nicht groesser als die "
+                        "Bohrung %.1f mm — das Rad verschwindet in seiner "
+                        "eigenen Nabe. Groebere Teilung oder mehr Zaehne."
+                        % (label, d - float(rollen_d), bohrung))
                 rad = rad.cut(Part.makeCylinder(
                     bohrung / 2.0 + 0.05, float(breite) + 4.0,
                     Vector(-float(breite) / 2.0 - 2.0, ry, rz),

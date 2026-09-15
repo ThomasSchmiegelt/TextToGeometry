@@ -5678,12 +5678,21 @@ class _MakroCommand:
     def IsActive(self) -> bool:
         return True
 
+    #: Skill-Ordner, die ausser Tools/ auf sys.path gehoeren. Ein Skill
+    #: darf aus mehreren Dateien bestehen (Skills/Verbrennungsmotor ist ein
+    #: Skript je Motorbauteil); seine Module finden einander nur, wenn ihr
+    #: Ordner auf dem Pfad steht.
+    SKILL_PFADE = ("Verbrennungsmotor",)
+
     def _tools(self):
-        """Das Tools-Verzeichnis des Add-ons auf sys.path bringen."""
-        pfad = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                            "Tools")
-        if os.path.isdir(pfad) and pfad not in sys.path:
-            sys.path.insert(0, pfad)
+        """Tools/ und die mehrteiligen Skill-Ordner auf sys.path bringen."""
+        wurzel = os.path.dirname(os.path.abspath(__file__))
+        pfad = os.path.join(wurzel, "Tools")
+        pfade = [pfad] + [os.path.join(wurzel, "Skills", n)
+                          for n in self.SKILL_PFADE]
+        for p in pfade:
+            if os.path.isdir(p) and p not in sys.path:
+                sys.path.insert(0, p)
         return pfad
 
     def felder(self, M):
@@ -5826,21 +5835,28 @@ class T2GKurbeltriebCommand(_MakroCommand):
                    gruppe="Motor",
                    hinweis="R = Reihe, V = V-Motor mit dem üblichen "
                            "Bankwinkel"),
+            M.Feld("bankwinkel", "Bankwinkel", "Grad", 0.0, 0.0, 120.0,
+                   gruppe="Motor",
+                   hinweis="0 = der übliche Winkel der Bauform. Einen V6 "
+                           "gibt es mit 60 und mit 90 Grad; der "
+                           "Hubzapfenversatz folgt daraus"),
             M.Feld("bohrung", "Bohrung", "mm", 86.0, 30.0, 200.0,
                    gruppe="Motor"),
             M.Feld("hub", "Hub", "mm", 86.0, 20.0, 200.0, gruppe="Motor"),
             M.Feld("stichmass", "Pleuelstichmaß", "mm", 0.0, 0.0, 600.0,
                    gruppe="Motor", hinweis="0 = 1,75 · Hub vorschlagen"),
-            M.Feld("kompressionshoehe", "Kompressionshöhe", "mm", 32.0, 10.0,
+            M.Feld("kompressionshoehe", "Kompressionshöhe", "mm", 0.0, 0.0,
                    120.0, gruppe="Motor",
-                   hinweis="Bolzenmitte bis Kolbenboden"),
+                   hinweis="Bolzenmitte bis Kolbenboden; 0 = aus der "
+                           "Auslegung (0,372 · Bohrung)"),
             M.Feld("zylinderabstand", "Zylinderabstand", "mm", 0.0, 0.0,
                    400.0, gruppe="Motor", hinweis="0 = 1,18 · Bohrung"),
 
             M.Feld("ventile_je_zylinder", "Ventile je Zylinder", "Stk", 4, 2,
                    4, gruppe="Ventiltrieb"),
-            M.Feld("ventilhub", "Ventilhub", "mm", 10.0, 2.0, 20.0,
-                   gruppe="Ventiltrieb"),
+            M.Feld("ventilhub", "Ventilhub", "mm", 0.0, 0.0, 20.0,
+                   gruppe="Ventiltrieb",
+                   hinweis="0 = aus der Auslegung (0,116 · Bohrung)"),
             M.Feld("spreizung", "Spreizung", "Grad", 110.0, 80.0, 140.0,
                    gruppe="Ventiltrieb",
                    hinweis="Nockenscheitel nach OT – hält Ventil und Kolben "
@@ -5855,16 +5871,25 @@ class T2GKurbeltriebCommand(_MakroCommand):
                    gruppe="Ventiltrieb",
                    hinweis="Das Nockenrad bekommt das Doppelte – 2:1"),
 
-            M.Feld("bolzen_d", "Kolbenbolzen", "mm", 22.0, 8.0, 60.0,
-                   gruppe="Wellen"),
-            M.Feld("hubzapfen_d", "Hubzapfen", "mm", 48.0, 15.0, 120.0,
-                   gruppe="Wellen"),
-            M.Feld("hauptlager_d", "Hauptlager", "mm", 54.0, 15.0, 140.0,
-                   gruppe="Wellen"),
-            M.Feld("pleuel_breite", "Pleuelbreite", "mm", 22.0, 8.0, 80.0,
+            # 0 heisst "aus kt_auslegung". Dort steht jedes geteilte Mass
+            # genau einmal — der Kolbenbolzen im Kolben UND im kleinen
+            # Pleuelauge, der Hubzapfen in der Kurbelwelle UND im grossen.
+            # Feste Vorgaben hier passten bei 86 mm Bohrung und sonst nie.
+            M.Feld("bolzen_d", "Kolbenbolzen", "mm", 0.0, 0.0, 60.0,
                    gruppe="Wellen",
-                   hinweis="Bestimmt beim V-Motor den Bankversatz: zwei "
-                           "Pleuel nebeneinander auf einem Hubzapfen"),
+                   hinweis="0 = aus der Auslegung (0,256 · Bohrung); gilt "
+                           "für Kolben und Pleuel gemeinsam"),
+            M.Feld("hubzapfen_d", "Hubzapfen", "mm", 0.0, 0.0, 120.0,
+                   gruppe="Wellen",
+                   hinweis="0 = aus der Auslegung (0,558 · Bohrung)"),
+            M.Feld("hauptlager_d", "Hauptlager", "mm", 0.0, 0.0, 140.0,
+                   gruppe="Wellen",
+                   hinweis="0 = aus der Auslegung (0,628 · Bohrung)"),
+            M.Feld("pleuel_breite", "Pleuelbreite", "mm", 0.0, 0.0, 80.0,
+                   gruppe="Wellen",
+                   hinweis="0 = aus der Auslegung. Bestimmt beim V-Motor "
+                           "den Bankversatz: zwei Pleuel nebeneinander auf "
+                           "einem Hubzapfen"),
 
             M.Feld("mit_ventiltrieb", "Ventiltrieb bauen", "", "ja",
                    auswahl=["ja", "nein"], gruppe="Umfang"),

@@ -1,9 +1,17 @@
 # SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-NoMilitary
-"""Ventil — Teller mit Sitzfase, Schaft, Keilnut am Schaftende.
+"""Ventil — die gemeinsame Grundform von Ein- und Auslassventil.
 
-Gebaut wird entlang **+Z**, Schaft nach oben. Der Ursprung liegt in der
-**Tellerunterkante** (der Brennraumseite) — das ist die Fläche, die im
-Zylinderkopf sitzt und den Brennraum begrenzt.
+Dieses Skript baut **kein** fertiges Bauteil des Motors. Es ist der Rohling,
+aus dem ``kt_einlassventil`` und ``kt_auslassventil`` ihre beiden wirklich
+verschiedenen Teile machen; der Ventiltrieb ruft die beiden, nie dieses hier.
+Getrennt gehalten, weil Teller, Sitzfase, Schaft und Keilnut bei beiden
+gleich entstehen — verschieden sind die Maße, die Form des Übergangs und der
+hohle Schaft des Auslassventils.
+
+Teller mit Sitzfase, Schaft, Keilnut am Schaftende. Gebaut wird entlang
+**+Z**, Schaft nach oben. Der Ursprung liegt in der **Tellerunterkante**
+(der Brennraumseite) — das ist die Fläche, die im Zylinderkopf sitzt und den
+Brennraum begrenzt.
 
 Die Sitzfase hat 45°; der wirksame Sitzdurchmesser liegt darunter und ist als
 Kennwert ausgewiesen, weil der Zylinderkopf ihn braucht.
@@ -50,17 +58,55 @@ def kennwerte(teller_d=31.0, schaft_d=6.0, laenge=110.0, fase=45.0, **_rest):
     }
 
 
+def _uebergang(rt, rs, hoehe, z0, form=1.0, stuecke=8):
+    """Der Übergang vom Teller zum Schaft als Folge von Kegelstümpfen.
+
+    ``form`` ist der Exponent des Profils ``r(f) = rs + (rt-rs)·(1-f)^form``:
+
+    * ``1.0`` — gerade. Der klassische Flachteller: der Übergang ist ein
+      glatter Kegel.
+    * ``2.0`` — **Tulpenform**. Der Radius fällt zuerst schnell und dann
+      flach aus, die Unterseite ist also hohl. Das ist die Form des
+      Auslassventils: sie leitet die Wärme besser aus dem Tellerrand ab und
+      strömt beim Ausschieben sauberer ab.
+
+    Der Unterschied ist messbar — ein Tulpenventil hat bei gleichem Teller
+    und Schaft weniger Material im Übergang.
+    """
+    n = max(2, int(stuecke))
+    h = float(hoehe) / n
+    stuecke_liste = []
+    for i in range(n):
+        f0 = i / float(n)
+        f1 = (i + 1) / float(n)
+        r0 = rs + (rt - rs) * (1.0 - f0) ** float(form)
+        r1 = rs + (rt - rs) * (1.0 - f1) ** float(form)
+        stuecke_liste.append(Part.makeCone(
+            max(r0, rs), max(r1, rs), h, Vector(0, 0, float(z0) + i * h)))
+    koerper = stuecke_liste[0]
+    for weiter in stuecke_liste[1:]:
+        koerper = koerper.fuse(weiter)
+    return koerper
+
+
 def baue(teller_d=31.0, schaft_d=6.0, laenge=110.0, teller_t=3.0, fase=45.0,
-         fase_b=2.0, kegel_h=9.0, nut_t=0.8, nut_h=3.0, name="Ventil"):
+         fase_b=2.0, kegel_h=9.0, nut_t=0.8, nut_h=3.0, kegel_form=1.0,
+         hohl_d=0.0, hohl_anteil=0.75, name="Ventil"):
     """Ein Ventil als :class:`Bauteil`.
 
-    teller_d   Tellerdurchmesser [mm]
-    schaft_d   Schaftdurchmesser [mm]
-    laenge     Gesamtlänge von der Tellerunterkante bis zum Schaftende [mm]
-    teller_t   Dicke des Tellerrandes [mm]
-    fase       Sitzwinkel [Grad], üblich 45
-    kegel_h    Höhe des Übergangs Teller → Schaft [mm]
-    nut_t      Tiefe der Keilnut am Schaftende [mm]
+    teller_d    Tellerdurchmesser [mm]
+    schaft_d    Schaftdurchmesser [mm]
+    laenge      Gesamtlänge von der Tellerunterkante bis zum Schaftende [mm]
+    teller_t    Dicke des Tellerrandes [mm]
+    fase        Sitzwinkel [Grad], üblich 45
+    kegel_h     Höhe des Übergangs Teller → Schaft [mm]
+    nut_t       Tiefe der Keilnut am Schaftende [mm]
+    kegel_form  1,0 = gerader Kegel, 2,0 = Tulpenform (siehe ``_uebergang``)
+    hohl_d      Durchmesser der Schaftbohrung [mm]; > 0 gibt einen
+                **innen geschlossenen Hohlraum** — der natriumgefüllte
+                Schaft des Auslassventils. Der Körper bleibt ein Solid,
+                bekommt aber eine zweite Schale.
+    hohl_anteil Bis zu welchem Anteil der Länge die Bohrung reicht
     """
     rt = float(teller_d) / 2.0
     rs = float(schaft_d) / 2.0
@@ -78,13 +124,27 @@ def baue(teller_d=31.0, schaft_d=6.0, laenge=110.0, teller_t=3.0, fase=45.0,
     teller = Part.makeCone(max(unten_r, rs + 0.5), rt, fb, Vector(0, 0, 0))
     teller = teller.fuse(Part.makeCylinder(rt, float(teller_t),
                                            Vector(0, 0, fb)))
-    # Uebergang zum Schaft
-    kegel = Part.makeCone(rt, rs, float(kegel_h),
-                          Vector(0, 0, fb + float(teller_t)))
+    # Uebergang zum Schaft — gerade oder als Tulpe.
+    kegel = _uebergang(rt, rs, float(kegel_h), fb + float(teller_t),
+                       float(kegel_form))
     schaft_z = fb + float(teller_t) + float(kegel_h)
     schaft = Part.makeCylinder(rs, l - schaft_z, Vector(0, 0, schaft_z))
 
     koerper = teller.fuse(kegel).fuse(schaft)
+
+    # Hohler, natriumgefuellter Schaft: eine Bohrung, die NIRGENDS nach
+    # aussen durchbricht. Sie faengt im Teller an und endet unter der
+    # Keilnut — dort sitzt spaeter der Stoessel, da darf kein Loch sein.
+    if float(hohl_d) > 0.0:
+        rh = float(hohl_d) / 2.0
+        if rh >= rs - 0.8:
+            raise ValueError(
+                "Die Schaftbohrung (%.1f) laesst bei %.1f mm Schaft keine "
+                "Wand uebrig." % (float(hohl_d), float(schaft_d)))
+        z_unten = fb + float(teller_t) * 0.5
+        z_oben = l * float(hohl_anteil)
+        koerper = koerper.cut(Part.makeCylinder(rh, z_oben - z_unten,
+                                                Vector(0, 0, z_unten)))
 
     # Keilnut am Schaftende
     if float(nut_t) > 0.0:

@@ -18,6 +18,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # enthaelt eine Kopie dieser Datei.
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "Tools"))
+# Der Kurbeltrieb liegt als mehrteiliger Skill unter Skills/Verbrennungsmotor:
+# ein Skript je Bauteil, Verbrennungsmotor.py nur als Einstieg.
+sys.path.insert(0, os.path.join(HERE, "Skills", "Verbrennungsmotor"))
 
 import Part
 import FreeCAD
@@ -28,7 +31,10 @@ if not hasattr(FreeCADGui, "addCommand"):
 if not hasattr(FreeCADGui, "SendMsgToActiveView"):
     FreeCADGui.SendMsgToActiveView = lambda *a, **k: None
 
+import kt_auslassventil
+import kt_auslegung
 import kt_bauformen as KB
+import kt_einlassventil
 import kt_kinematik
 import kt_kolben
 import kt_kurbelwelle
@@ -66,9 +72,10 @@ log("\n--- Die Bauteile einzeln ---")
 FreeCAD.newDocument("KurbeltriebTest")
 # Ein Skript je Bauteil, darueber die Baugruppen, darueber der Motor. Jede
 # Stufe hat ihren eigenen Selbsttest — geht etwas kaputt, sagt die Stufe, wo.
-for modul in (KS, KB, kt_kinematik, kt_kolben, kt_pleuel, kt_kurbelwelle,
-              kt_ventil, kt_ventilfeder, kt_stoessel, kt_nockenwelle,
-              kt_steuertrieb, kt_kurbeltrieb, kt_ventiltrieb):
+for modul in (KS, KB, kt_kinematik, kt_auslegung, kt_kolben, kt_pleuel,
+              kt_kurbelwelle, kt_ventil, kt_einlassventil, kt_auslassventil,
+              kt_ventilfeder, kt_stoessel, kt_nockenwelle, kt_steuertrieb,
+              kt_kurbeltrieb, kt_ventiltrieb):
     name = modul.__name__
     try:
         log("     " + modul.selbsttest())
@@ -282,6 +289,56 @@ if len(rollen) > 4:
     pruefe(max(abst) < 2.0 * min(abst),
            "die Kettenrollen liegen gleichmaessig (%.2f bis %.2f mm)"
            % (min(abst), max(abst)))
+# --- Die Tabelle der uebergreifenden Masse -------------------------------
+log("\n--- Uebergreifende Masse ---")
+a = kt_auslegung.auslegen(bohrung=120.0, hub=110.0, bauform="V8")
+pruefe(not [t for ok, t in kt_auslegung.pruefe(a) if not ok],
+       "die Auslegung eines 120x110-V8 ist in sich stimmig")
+# Der eigentliche Zweck: Kolben und Pleuel bekommen DENSELBEN Bolzen.
+gross = kt_motor.baue(bauform="R4", bohrung=120.0, hub=110.0,
+                      mit_ventiltrieb=False)
+g_teile, g_kenn, g_proben = gross
+schlecht = [t for ok, t in kt_motor.pruefe(g_teile, g_proben, g_kenn)
+            if not ok]
+pruefe(not schlecht, "R4 mit 120 mm Bohrung passt zusammen%s"
+       % ("" if not schlecht else ": " + "; ".join(schlecht)))
+pruefe(abs(g_kenn["auslegung"]["kolbenbolzen_d"] - 30.7) < 0.2,
+       "der Kolbenbolzen waechst mit (%.1f mm bei 120 mm Bohrung)"
+       % g_kenn["auslegung"]["kolbenbolzen_d"])
+# Und der Hubzapfen traegt das Pleuel auch dann noch.
+pruefe(g_kenn["auslegung"]["hubzapfen_b"] > g_kenn["auslegung"]["pleuel_breite"],
+       "der Hubzapfen (%.1f breit) traegt das Pleuel (%.1f)"
+       % (g_kenn["auslegung"]["hubzapfen_b"],
+          g_kenn["auslegung"]["pleuel_breite"]))
+
+# --- Ein- und Auslassventil sind zwei verschiedene Bauteile --------------
+log("\n--- Ein- und Auslassventil ---")
+ev = kt_einlassventil.baue(bohrung=86.0)
+av = kt_auslassventil.baue(bohrung=86.0)
+pruefe(ev.kennwerte["teller_d"] > av.kennwerte["teller_d"],
+       "der Einlassteller (%.1f) ist groesser als der Auslassteller (%.1f)"
+       % (ev.kennwerte["teller_d"], av.kennwerte["teller_d"]))
+pruefe(av.kennwerte["schaft_d"] > ev.kennwerte["schaft_d"],
+       "der Auslassschaft (%.1f) ist dicker als der Einlassschaft (%.1f)"
+       % (av.kennwerte["schaft_d"], ev.kennwerte["schaft_d"]))
+pruefe(len(av.koerper[0][1].Shells) == 2 and
+       len(ev.koerper[0][1].Shells) == 1,
+       "nur das Auslassventil hat den geschlossenen Natriumschaft")
+
+# --- Freier Bankwinkel ---------------------------------------------------
+log("\n--- Bankwinkel ---")
+pruefe(abs(KB.hubzapfenversatz("V6", bankwinkel=90.0) - 30.0) < 1e-6,
+       "ein 90-Grad-V6 bekommt 30 Grad Hubzapfenversatz")
+v6_90 = kt_motor.baue(bauform="V6", bankwinkel=90.0, mit_ventiltrieb=False)
+schlecht = [t for ok, t in kt_motor.pruefe(v6_90[0], v6_90[2], v6_90[1])
+            if not ok]
+pruefe(not schlecht, "der 90-Grad-V6 passt zusammen%s"
+       % ("" if not schlecht else ": " + "; ".join(schlecht)))
+winkel = sorted({round(w, 1) for _s, _x, w, _z
+                 in KB.zylinderlagen("V6", 101.5, bankwinkel=90.0)})
+pruefe(winkel == [-45.0, 45.0],
+       "die Baenke des 90-Grad-V6 stehen bei %s Grad" % winkel)
+
 FreeCAD.closeDocument(doc.Name)
 
 log("\nFEHLER: %d" % len(FEHLER))

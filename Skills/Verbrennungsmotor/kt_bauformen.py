@@ -53,25 +53,65 @@ def namen():
     return ("R2", "R3", "R4", "R5", "R6", "V4", "V6", "V8", "V10", "V12")
 
 
-def daten(bauform):
-    """(Zylinderzahl, Bankwinkel) einer Bauform."""
+def bauform_aus(zylinder, bankwinkel=0.0):
+    """Name der Bauform aus Zylinderzahl und Bankwinkel.
+
+    Für den Weg über die Skill-Maske: die nimmt nur Zahlen, und ``"V8"`` ist
+    keine. Aus 8 Zylindern und 90° Bankwinkel wird der V8, aus 4 Zylindern
+    und 0° der R4. Der Bankwinkel wird dabei auf den gebräuchlichen Wert der
+    Bauform gebracht — einen V8 mit 63° gibt es nicht, und ein stillschweigend
+    falscher Winkel wäre schlimmer als eine Meldung.
+    """
+    z = int(zylinder)
+    reihe = float(bankwinkel) < 1.0
+    for name, (zahl, winkel) in BAUFORMEN.items():
+        if zahl == z and (winkel == 0.0) == reihe:
+            return name
+    moeglich = ", ".join("%s (%d Zyl., %.0f Grad)" % (n, k[0], k[1])
+                         for n, k in sorted(BAUFORMEN.items()))
+    raise BauformFehler(
+        "%d Zylinder mit %.0f Grad Bankwinkel ist keine der Bauformen: %s"
+        % (z, float(bankwinkel), moeglich))
+
+
+def daten(bauform, bankwinkel=0.0):
+    """(Zylinderzahl, Bankwinkel) einer Bauform.
+
+    ``bankwinkel`` > 0 überschreibt den Tabellenwert. Den gibt es wirklich:
+    einen V6 baut Renault mit 60°, VW mit 90°, Honda mit 55°; einen V12
+    gibt es mit 60° und mit 65°. Der Bankwinkel ist eine Bauentscheidung
+    (Bauraum, Massenausgleich), keine Eigenschaft der Zylinderzahl.
+
+    Er schlägt dabei überall durch, wo er hingehört: der Hubzapfenversatz
+    ist ``|720/z − bank|``, ein 90-Grad-V6 bekommt also 30° Versatz, ein
+    60-Grad-V6 keinen. Ein Reihenmotor bleibt ein Reihenmotor — bei ihm
+    wird der Wert nicht angenommen.
+    """
     b = str(bauform).upper().strip()
     if b not in BAUFORMEN:
         raise BauformFehler("Unbekannte Bauform %r. Bekannt: %s"
                             % (bauform, ", ".join(namen())))
-    return BAUFORMEN[b]
+    z, tabelle = BAUFORMEN[b]
+    w = float(bankwinkel or 0.0)
+    if tabelle <= 0.0 or w <= 0.0:
+        return z, tabelle
+    if not 30.0 <= w <= 120.0:
+        raise BauformFehler(
+            "Bankwinkel %.1f Grad ist keiner: ueblich sind 60 bis 90, "
+            "moeglich 30 bis 120." % w)
+    return z, w
 
 
-def ist_v(bauform):
-    return daten(bauform)[1] > 0.0
+def ist_v(bauform, bankwinkel=0.0):
+    return daten(bauform, bankwinkel)[1] > 0.0
 
 
-def zapfenzahl(bauform):
+def zapfenzahl(bauform, bankwinkel=0.0):
     """Wie viele Hubzapfen die Kurbelwelle hat.
 
     Beim V-Motor teilen sich zwei gegenüberliegende Zylinder einen Zapfen.
     """
-    z, winkel = daten(bauform)
+    z, winkel = daten(bauform, bankwinkel)
     return z // 2 if winkel > 0.0 else z
 
 
@@ -81,19 +121,20 @@ def zuendabstand(bauform):
     return 720.0 / z
 
 
-def hubzapfenversatz(bauform, v8_kreuzebene=True):
+def hubzapfenversatz(bauform, v8_kreuzebene=True, bankwinkel=0.0):
     """Nötiger Versatz innerhalb eines Hubzapfens [Grad], 0 = keiner.
 
     Ein V-Motor läuft nur dann gleichmäßig, wenn Bankwinkel und Zündabstand
     zusammenpassen. Tun sie es nicht, wird der Hubzapfen gesplittet.
     """
-    z, bank = daten(bauform)
+    z, bank = daten(bauform, bankwinkel)
     if bank <= 0.0:
         return 0.0
-    if str(bauform).upper() == "V8" and v8_kreuzebene:
+    if str(bauform).upper() == "V8" and v8_kreuzebene and \
+            abs(bank - BAUFORMEN["V8"][1]) < 1e-9:
         return 0.0
-    noetig = 720.0 / z - bank
-    return round(noetig, 3) if abs(noetig) > 1e-9 else 0.0
+    noetig = abs(720.0 / z - bank)
+    return round(noetig, 3) if noetig > 1e-9 else 0.0
 
 
 #: Hubzapfenwinkel je Bauform, in Zapfenreihenfolge [Grad].
@@ -135,14 +176,15 @@ def zapfenwinkel(bauform, v8_kreuzebene=True):
     return list(ZAPFENWINKEL[b])
 
 
-def zylinderlagen(bauform, bohrungsabstand, v8_kreuzebene=True):
+def zylinderlagen(bauform, bohrungsabstand, v8_kreuzebene=True,
+                  bankwinkel=0.0):
     """Je Zylinder (Bank, x entlang der Kurbelwelle, Bankwinkel, Zapfen-Index).
 
     Bank 0 ist die erste Reihe, Bank 1 die zweite. Der Bankwinkel ist der
     Winkel der Zylinderachse gegen die Senkrechte: beim Reihenmotor 0, beim
     V-Motor ±bank/2 — die Zylinderbänke stehen symmetrisch zur Mitte.
     """
-    z, bank = daten(bauform)
+    z, bank = daten(bauform, bankwinkel)
     abstand = float(bohrungsabstand)
     lagen = []
     if bank <= 0.0:
@@ -200,18 +242,20 @@ def zuendfolge(bauform, v8_kreuzebene=True):
     return list(range(1, z + 1))
 
 
-def kennwerte(bauform, bohrung=86.0, hub=86.0, v8_kreuzebene=True):
+def kennwerte(bauform, bohrung=86.0, hub=86.0, v8_kreuzebene=True,
+              bankwinkel=0.0):
     """Die Auslegung auf einen Blick, ohne Geometrie."""
-    z, bank = daten(bauform)
+    z, bank = daten(bauform, bankwinkel)
     import math
     einzel = math.pi * (float(bohrung) / 2.0) ** 2 * float(hub) / 1000.0
     return {
         "bauform": str(bauform).upper(),
         "zylinder": z,
         "bankwinkel": bank,
-        "hubzapfen": zapfenzahl(bauform),
+        "hubzapfen": zapfenzahl(bauform, bankwinkel),
         "zapfenwinkel": zapfenwinkel(bauform, v8_kreuzebene),
-        "hubzapfenversatz": hubzapfenversatz(bauform, v8_kreuzebene),
+        "hubzapfenversatz": hubzapfenversatz(bauform, v8_kreuzebene,
+                                             bankwinkel),
         "zuendabstand": round(zuendabstand(bauform), 2),
         "zuendfolge": zuendfolge(bauform, v8_kreuzebene),
         "hubraum_cm3": round(einzel * z, 1),
@@ -319,4 +363,48 @@ def selbsttest():
     if abs(k["hubraum_cm3"] - 1998.0) > 2.0:
         raise AssertionError("R4 86x86 sind rund 1998 cm^3, nicht %.0f"
                              % k["hubraum_cm3"])
+    # --- Freier Bankwinkel -----------------------------------------------
+    # Ein V6 mit 90 Grad braucht 30 Grad Hubzapfenversatz, einer mit 60 Grad
+    # keinen — genau das ist der Sinn des gesplitteten Zapfens.
+    if abs(daten("V6", 90.0)[1] - 90.0) > 1e-9:
+        raise AssertionError("der Bankwinkel laesst sich nicht setzen")
+    if abs(hubzapfenversatz("V6", bankwinkel=90.0) - 30.0) > 1e-6:
+        raise AssertionError(
+            "90-Grad-V6: Versatz %.2f statt 30 Grad"
+            % hubzapfenversatz("V6", bankwinkel=90.0))
+    # Und ein 60-Grad-V6 braucht 60 Grad: |720/6 - 60|. Gleichmaessig
+    # zuenden ohne Versatz tut nur, wessen Bankwinkel gleich dem
+    # Zuendabstand ist — V8 mit 90, V10 mit 72, V12 mit 60 Grad.
+    if abs(hubzapfenversatz("V6", bankwinkel=60.0) - 60.0) > 1e-6:
+        raise AssertionError("60-Grad-V6: Versatz %.2f statt 60 Grad"
+                             % hubzapfenversatz("V6", bankwinkel=60.0))
+    for gleich in ("V10", "V12"):
+        z, bank = daten(gleich)
+        if abs(720.0 / z - bank) > 1e-9:
+            continue
+        if hubzapfenversatz(gleich) != 0.0:
+            raise AssertionError("%s zuendet gleichmaessig und braucht "
+                                 "keinen Versatz" % gleich)
+    # Ein V8 mit 60 Grad ist nicht mehr der kreuzebenige Standard und
+    # braucht 30 Grad Versatz.
+    if abs(hubzapfenversatz("V8", True, 60.0) - 30.0) > 1e-6:
+        raise AssertionError("60-Grad-V8: Versatz %.2f statt 30"
+                             % hubzapfenversatz("V8", True, 60.0))
+    # Bei einem Reihenmotor wird der Wert NICHT angenommen.
+    if daten("R4", 90.0)[1] != 0.0:
+        raise AssertionError("ein Reihenmotor hat keinen Bankwinkel")
+    # Und die Baenke stehen weiter symmetrisch zur Senkrechten.
+    lagen = zylinderlagen("V6", 101.5, bankwinkel=90.0)
+    winkel = sorted({w for _s, _x, w, _z in lagen})
+    if abs(winkel[0] + 45.0) > 1e-9 or abs(winkel[-1] - 45.0) > 1e-9:
+        raise AssertionError("90-Grad-V6: Bankachsen bei %s statt -45/+45"
+                             % winkel)
+    # Unsinnige Winkel muessen auffallen.
+    for w in (5.0, 200.0):
+        try:
+            daten("V8", w)
+            raise AssertionError("Bankwinkel %.0f blieb unbemerkt" % w)
+        except BauformFehler:
+            pass
+
     return "Bauformen-Selbsttest bestanden (%d Bauformen)" % len(BAUFORMEN)

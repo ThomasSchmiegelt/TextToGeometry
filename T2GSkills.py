@@ -166,15 +166,46 @@ def _safe_import(name, *a, **k):
     raise ImportError(f"import of {name!r} is not allowed inside a skill")
 
 
-def _skill_namespace() -> dict:
+def _sibling_import(skill_dir: str):
+    """Importer that also admits the skill's OWN files.
+
+    A skill may be a folder of several modules rather than one file --
+    ``Skills/Verbrennungsmotor`` is one engine part per script, sixteen of
+    them, with ``Verbrennungsmotor.py`` only the entry point. Those siblings
+    have to be importable or the split is impossible.
+
+    Say plainly what this widens: a module imported this way runs with the
+    normal builtins, so anything a skill folder ships can do anything. That
+    is not a new hole for a *learned* skill -- ``create_skill`` writes a
+    single file and can never put a sibling next to it -- but it does mean a
+    multi-file skill is trusted code, like the add-on itself. Only files
+    directly in the skill's own directory qualify; nothing else.
+    """
+
+    def importer(name, *a, **k):
+        head = str(name).split(".")[0]
+        if head in _ALLOWED_IMPORTS:
+            return _py_builtins.__import__(name, *a, **k)
+        nachbar = os.path.join(skill_dir, head + ".py")
+        if skill_dir and os.path.isfile(nachbar):
+            if skill_dir not in sys.path:
+                sys.path.insert(0, skill_dir)
+            return _py_builtins.__import__(name, *a, **k)
+        raise ImportError(f"import of {name!r} is not allowed inside a skill")
+
+    return importer
+
+
+def _skill_namespace(skill_dir: str | None = None) -> dict:
     # `import x` resolves __import__ through __builtins__, never through the
     # globals dict -- so the guard has to live in __builtins__ to have any
     # effect at all.
+    einfuhr = _sibling_import(skill_dir) if skill_dir else _safe_import
     guarded_builtins = dict(_SKILL_BUILTINS)
-    guarded_builtins["__import__"] = _safe_import
+    guarded_builtins["__import__"] = einfuhr
     ns = dict(_SKILL_BUILTINS)
     ns["__builtins__"] = guarded_builtins
-    ns["__import__"] = _safe_import
+    ns["__import__"] = einfuhr
     try:
         ns["math"] = _py_builtins.__import__("math")
     except Exception:
@@ -199,7 +230,7 @@ def load_skill_file(path: str) -> LoadedSkill:
         raise SkillError(f"Skill file not found: {path}")
     with open(path, "r", encoding="utf-8") as fh:
         source = fh.read()
-    ns = _skill_namespace()
+    ns = _skill_namespace(os.path.dirname(os.path.abspath(path)))
     try:
         code = compile(source, path, "exec")
     except SyntaxError as e:
