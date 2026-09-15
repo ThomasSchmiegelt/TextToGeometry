@@ -122,9 +122,9 @@ def _schaltmuffe(d_innen, d_aussen, breite, nut_t=1.5):
 
 
 def kennwerte(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
-              welle_d=20.0, **_rest):
+              welle_d=20.0, z_min=12, **_rest):
     """Die Auslegung ohne Geometrie — schnell, für die Maske und den Agenten."""
-    paare = G.gangpaare(int(zaehne_summe), int(gaenge))
+    paare = G.gangpaare(int(zaehne_summe), int(gaenge), int(z_min))
     a = G.achsabstand(modul, *paare[0][:2])
     schritt = float(breite) + float(luft)
     return {
@@ -138,6 +138,7 @@ def kennwerte(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
 
 
 def baue(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
+         z_min=12,
          verzahnung="gerade", schraegwinkel=15.0, eingriffswinkel=20.0,
          flankenspiel=0.05, welle_d=20.0, lager_reihe="62", spiel=0.1,
          gehaeuse_luft=3.0, wand=4.0, flansch_b=12.0, schraube_d=6.0,
@@ -147,6 +148,12 @@ def baue(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
     gaenge         Zahl der Gangstufen
     modul          Verzahnungsmodul [mm]
     zaehne_summe   z1 + z2, für ALLE Gänge gleich -> ein Achsabstand
+    z_min          kleinste Zähnezahl des kleinsten Rades. 12 ist geometrisch
+                   möglich, aber ein 20-Grad-Evolventenrad **unterschneidet**
+                   unter 17 Zähnen: der Kopf des Gegenrades gräbt sich in den
+                   Fuß. Nachgemessen an einem Paar 12/57: 5,9 %
+                   Durchdringung, bei 17/52 keine. Wer unter 17 geht, braucht
+                   Profilverschiebung, und die kann FCGear hier nicht.
     breite         Zahnbreite [mm]        luft  Luft zwischen den Radpaaren
     verzahnung     "gerade" | "schraeg" | "pfeil"
     schraegwinkel  Schrägungswinkel [Grad], wirkt bei schraeg und pfeil
@@ -159,7 +166,7 @@ def baue(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
     gaenge = max(1, int(gaenge))
     doc = doc or FreeCAD.ActiveDocument or FreeCAD.newDocument("Getriebe")
 
-    paare = G.gangpaare(int(zaehne_summe), gaenge)
+    paare = G.gangpaare(int(zaehne_summe), gaenge, int(z_min))
     a = G.achsabstand(modul, *paare[0][:2])
     schritt = float(breite) + float(luft)
 

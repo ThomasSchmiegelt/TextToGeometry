@@ -600,10 +600,29 @@ litres and wrong everywhere else. What sizes a gearbox is torque, and torque
 goes with displacement, so a shaft designed for torsion needs
 `d ∝ T^(1/3)`: `getriebe_auslegung()` takes `20 mm · (V_H / 2000 cm³)^(1/3)`,
 puts the module at a tenth of that rounded to DIN 780, and the face width at
-six modules. A 6-litre V12 therefore gets 28.8 mm and module 3 where a
-2-litre R4 keeps 20 mm and module 2. It is a rule of thumb and says so — it
-replaces no tooth-root calculation, it only stops a big engine getting a toy
-gearbox.
+six modules. It is a rule of thumb and says so — it replaces no tooth-root
+calculation, it only stops a big engine getting a toy gearbox.
+
+Scaling the shaft alone was not enough: the **centre distance** stayed at a
+fixed 48 mm, which is small even for the two-litre reference (a passenger-car
+manual is 70–75). It is now `3.6 · shaft`, so 72 mm at two litres and 103.5
+at six, and the tooth sum follows as `2a/m` — that is what actually makes the
+gears big. Wall thickness, bolt size and bearing series follow the shaft too.
+
+Two things that only showed once the gearbox got real size:
+
+- **The countershaft was beside the input shaft, not below it.** The gearbox
+  is built with its second shaft at `+Y`, and at a V engine that is exactly
+  where the bank stands. `_getriebe_anflanschen` now rotates the whole
+  gearbox −90° about the crank axis before translating it — rotate first,
+  then move, or the input shaft itself leaves the axis. `pruefe()` checks
+  the countershaft really sits below.
+- **A 12-tooth gear undercuts.** `gangpaare` had `z_min = 12`, which is
+  geometrically possible but below the limit for a 20° involute without
+  profile shift; the mating tip digs into the root. Measured on a 12/57
+  pair: 5.9 % penetration, and none at 17/52. `getriebe_fcgear.baue` now
+  takes `z_min` (still 12 by default, so the existing gearbox is unchanged)
+  and the engine passes 17.
 
 **A DOHC head has two camshafts per bank, and one chain drives both.** The
 chain path (`kt_steuertrieb._kettenbahn`) therefore runs over any number of

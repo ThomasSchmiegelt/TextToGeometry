@@ -120,7 +120,8 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
          spreizung=110.0, ventilwinkel=12.0, pleuel_breite=0.0,
          bankwinkel=0.0, v8_kreuzebene=True, mit_ventiltrieb=True,
          mit_getriebe=False, getriebe_gaenge=5, getriebe_welle_d=0.0,
-         getriebe_modul=0.0, getriebe_zaehne_summe=48, doc=None):
+         getriebe_modul=0.0, getriebe_zaehne_summe=0,
+         getriebe_drehung=None, doc=None):
     """Ein vollständiger Motor als Liste von (Bezeichnung, Shape).
 
     bauform             R2 … V12
@@ -228,7 +229,8 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
     if mit_getriebe:
         teile.extend(_getriebe_anflanschen(
             kw.punkt("abtrieb"), k, doc, getriebe_gaenge,
-            getriebe_welle_d, getriebe_modul, getriebe_zaehne_summe))
+            getriebe_welle_d, getriebe_modul, getriebe_zaehne_summe,
+            getriebe_drehung))
     return teile, k, proben
 
 
@@ -237,17 +239,33 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
 MODULE = (1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0)
 
 #: Bezugspunkt der Getriebeauslegung: ein 2,0-Liter-Motor bekommt eine
-#: 20-mm-Eingangswelle. Daran haengt alles Weitere.
+#: 20-mm-Eingangswelle und 72 mm Achsabstand. Daran haengt alles Weitere.
 BEZUG_HUBRAUM = 2000.0
 BEZUG_WELLE = 20.0
 
+#: Achsabstand als Vielfaches des Wellendurchmessers. 3,6 trifft das
+#: Pkw-Schaltgetriebe: 20 mm Welle, 72 mm Achsabstand.
+ACHSABSTAND_JE_WELLE = 3.6
 
-def getriebe_auslegung(hubraum_cm3, welle_d=0.0, modul=0.0, zaehne_summe=48):
+#: Kleinste Zaehnezahl im Getriebe. Unter 17 unterschneidet ein
+#: 20-Grad-Evolventenrad, und der Kopf des Gegenrades graebt sich in den
+#: Fuss — gemessen an einem Paar 12/57: 5,9 % Durchdringung.
+Z_MIN = 17
+
+#: Drehung des Getriebes um die Kurbelwellenachse [Grad]. Die Vorgelegewelle
+#: entsteht in +Y, also SEITLICH neben der Eingangswelle — dort steht bei
+#: einem V-Motor die Bank. Sie gehoert nach UNTEN, und -90 Grad um X bringt
+#: sie dahin: (0, 1, 0) wird zu (0, 0, -1).
+DREHUNG = -90.0
+
+
+def getriebe_auslegung(hubraum_cm3, welle_d=0.0, modul=0.0, zaehne_summe=0,
+                       gaenge=5):
     """Die Maße des Getriebes, passend zum Motor.
 
-    Das Getriebe hat bisher feste 20 mm Welle und Modul 2 bekommen, gleich
-    ob davor ein Zweiliter-Vierzylinder oder ein Sechsliter-V12 stand. Das
-    ist keine Auslegung, sondern ein Zufall.
+    Das Getriebe hat lange feste 20 mm Welle und Modul 2 bekommen, gleich ob
+    davor ein Zweiliter-Vierzylinder oder ein Sechsliter-V12 stand. Das ist
+    keine Auslegung, sondern ein Zufall.
 
     Was ein Getriebe wirklich bestimmt, ist das **Drehmoment**, und das geht
     im ersten Zugriff mit dem Hubraum. Eine Welle auf Torsion ausgelegt
@@ -258,6 +276,15 @@ def getriebe_auslegung(hubraum_cm3, welle_d=0.0, modul=0.0, zaehne_summe=48):
     Ein Sechsliter bekommt damit 20 · 3^(1/3) = 28,8 mm statt 20. Der
     **Modul** folgt der Welle (rund ein Zehntel) und wird auf die Normreihe
     DIN 780 gerundet; die **Zahnbreite** ist das Sechsfache des Moduls.
+
+    Der **Achsabstand** wächst mit: 3,6 · Wellendurchmesser, also 72 mm beim
+    Zweiliter und 104 beim Sechsliter. Vorher stand er fest auf 48 mm — das
+    ist selbst für den Zweiliter zu wenig, ein Pkw-Schaltgetriebe liegt bei
+    70 bis 75. Aus Achsabstand und Modul folgt die **Zähnesumme**
+    ``z1 + z2 = 2a/m``, und die ist es, die die Räder groß macht.
+
+    Wand, Schraube und Lagerreihe folgen der Welle, damit das Gehäuse zum
+    Inhalt passt.
 
     Das ist eine Faustformel und wird auch so genannt: sie ersetzt keine
     Zahnfußrechnung. Sie sorgt dafür, dass ein großer Motor kein
@@ -270,18 +297,30 @@ def getriebe_auslegung(hubraum_cm3, welle_d=0.0, modul=0.0, zaehne_summe=48):
         roh = d / 10.0
         m = min(MODULE, key=lambda x: abs(x - roh))
     breite = round(6.0 * m, 1)
+    if int(zaehne_summe) > 0:
+        zsum = int(zaehne_summe)
+    else:
+        zsum = int(round(2.0 * ACHSABSTAND_JE_WELLE * d / m))
+        # gangpaare() braucht Luft nach unten: Z_MIN je Rad, dazu je Gang
+        # eine Stufe.
+        zsum = max(zsum, 2 * Z_MIN + 2 * max(1, int(gaenge) - 1) + 2)
     return {
         "welle_d": d,
         "modul": m,
         "breite": breite,
-        "zaehne_summe": int(zaehne_summe),
-        "achsabstand": round(m * int(zaehne_summe) / 2.0, 2),
+        "zaehne_summe": zsum,
+        "achsabstand": round(m * zsum / 2.0, 2),
+        "wand": round(max(4.0, 0.22 * d), 1),
+        "schraube_d": round(max(6.0, 0.28 * d), 1),
+        "lager_reihe": "63" if d >= 25.0 else "62",
+        "z_min": Z_MIN,
+        "drehung": DREHUNG,
         "hubraum_cm3": round(v, 1),
     }
 
 
 def _getriebe_anflanschen(abtrieb, k, doc, gaenge=5, welle_d=0.0, modul=0.0,
-                          zaehne_summe=48):
+                          zaehne_summe=0, drehung=None):
     """Das Getriebe aus Tools/getriebe_fcgear.py hinter den Motor setzen.
 
     Beide laufen in der Normallage entlang X mit der Welle auf y = z = 0 —
@@ -295,19 +334,30 @@ def _getriebe_anflanschen(abtrieb, k, doc, gaenge=5, welle_d=0.0, modul=0.0,
     import getriebe_fcgear as GF
 
     g = getriebe_auslegung(k.get("hubraum_cm3", BEZUG_HUBRAUM), welle_d,
-                           modul, zaehne_summe)
+                           modul, zaehne_summe, gaenge)
+    if drehung is not None:
+        g["drehung"] = float(drehung)
     teile = GF.baue(gaenge=int(gaenge), welle_d=g["welle_d"],
                     modul=g["modul"], breite=g["breite"],
-                    zaehne_summe=g["zaehne_summe"], doc=doc)
+                    zaehne_summe=g["zaehne_summe"], wand=g["wand"],
+                    schraube_d=g["schraube_d"], z_min=g["z_min"],
+                    lager_reihe=g["lager_reihe"], doc=doc)
     # Wo faengt die Eingangswelle des Getriebes in seinem eigenen Bild an?
     wellen = [s for n, s in teile if "welle" in n.lower()]
     if not wellen:
         return []
     anfang = min(s.BoundBox.XMin for s in wellen)
     versatz = FreeCAD.Vector(abtrieb.ort.x - anfang, 0.0, 0.0)
+    # Erst DREHEN, dann schieben: die Drehung geht um die Kurbelwellenachse
+    # (x-Achse durch den Ursprung), und die ist im Getriebebild die
+    # Eingangswelle. Andersherum wandert die Eingangswelle von der Achse.
+    dreh = float(g.get("drehung") or 0.0)
     aus = []
     for label, shp in teile:
         kopie = shp.copy()
+        if abs(dreh) > 1e-9:
+            kopie.rotate(FreeCAD.Vector(0, 0, 0), FreeCAD.Vector(1, 0, 0),
+                         dreh)
         kopie.translate(versatz)
         aus.append(("Getriebe: " + label, kopie))
     g.update({"gaenge": int(gaenge), "teile": len(aus),
@@ -440,9 +490,26 @@ def pruefe(teile=None, proben=None, kenn=None, toleranz=0.02, **kw):
             % (g["welle_d"], kenn.get("hubraum_cm3", 0.0), soll["welle_d"]))
         sag(g["modul"] in MODULE,
             "Modul %.2f ist ein Normmodul (DIN 780)" % g["modul"])
+        sag(g.get("z_min", 0) >= 17,
+            "kleinstes Rad %d Zaehne (ab 17 ohne Profilverschiebung)"
+            % g.get("z_min", 0))
         sag(g["welle_d"] < g["flansch_d"],
             "die Getriebewelle (%.1f) passt in den Schwungradflansch (%.1f)"
             % (g["welle_d"], g["flansch_d"]))
+        sag(abs(g["achsabstand"] - soll["achsabstand"]) < 0.5 or
+            g["achsabstand"] >= soll["achsabstand"],
+            "Achsabstand %.1f mm (Vorschlag %.1f zu %.1f mm Welle)"
+            % (g["achsabstand"], soll["achsabstand"], g["welle_d"]))
+        # Die Vorgelegewelle gehoert UNTER die Kurbelwellenachse, nicht
+        # seitlich daneben — dort steht beim V-Motor die Zylinderbank.
+        unten = [sh for n, sh in teile
+                 if n.startswith("Getriebe") and "welle" in n.lower()]
+        if len(unten) >= 2:
+            tiefste = min((b.ZMin + b.ZMax) / 2.0
+                          for b in (sh.BoundBox for sh in unten))
+            sag(tiefste < -g["achsabstand"] * 0.8,
+                "die Vorgelegewelle liegt %.1f mm unter der "
+                "Kurbelwellenachse" % abs(tiefste))
 
     # Kolben und Pleuel: je Zylinder eines.
     if kenn:
