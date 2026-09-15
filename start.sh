@@ -96,18 +96,26 @@ run_tests() {
 run_gui() {
     export T2G_PI_BIN="$PI_BIN"
     export T2G_OLLAMA_MODEL="$OLLAMA_MODEL"
-    say "Starte FreeCAD-GUI (Workbench: TextToGeometry) …"
-    exec env DISPLAY="${DISPLAY:-:0}" "$FREECAD"
+    # Weitere Argumente reicht start.sh an FreeCAD durch — damit laesst sich
+    # eine Datei gleich mit oeffnen:  ./start.sh gui Beispiele/…/V12.FCStd
+    if [ "$#" -gt 0 ]; then
+        say "Starte FreeCAD-GUI (Workbench: TextToGeometry) mit: $*"
+    else
+        say "Starte FreeCAD-GUI (Workbench: TextToGeometry) …"
+    fi
+    exec env DISPLAY="${DISPLAY:-:0}" "$FREECAD" "$@"
 }
 
 case "$MODE" in
     sync)  sync_src ;;
     test)  run_tests ;;
-    gui)   check_prereqs; run_gui ;;
+    gui)   shift; check_prereqs; run_gui "$@" ;;
     help|--help|-h)
         cat <<EOF
-start.sh [gui|sync|test]
-  gui   (Standard)  startet die FreeCAD-GUI mit der Workbench
+start.sh [gui [Datei …]|sync|test]
+  gui   (Standard)  startet die FreeCAD-GUI mit der Workbench;
+                    weitere Argumente werden an FreeCAD durchgereicht
+                    (z. B. eine .FCStd-Datei zum Oeffnen)
   sync          Development-Dateien in den FreeCAD-Mod-Pfad kopieren
   test          alle Tests unter FreeCADCmd ausführen
 EOF
