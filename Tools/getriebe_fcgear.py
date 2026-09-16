@@ -490,8 +490,11 @@ def _baue_vorgelege(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0,
         # (30 mm unter 29-mm-Nabenbohrung) durchdrangen sich Nabe und Welle
         # um 2,9 %. Das Lager der Antriebswelle sitzt an der Gehaeusewand,
         # nicht am Wellenende.
+        # Bis an die vorderste Ebene der Glocke, also durch beide
+        # Stirnflansche hindurch.
         welle_a = welle_a.fuse(Part.makeCylinder(
-            welle_d / 2.0, gl, Vector(0, 0, -gl))).removeSplitter()
+            welle_d / 2.0, gl + 3.0 * wand,
+            Vector(0, 0, -(gl + 3.0 * wand)))).removeSplitter()
     lege_ab(welle_a, "Antriebswelle", (x_welle, 0.0, 0.0))
     # Zapfen: die Antriebswelle stuetzt sich in der Hauptwelle ab. Er
     # braucht dort eine BOHRUNG — als blosser Zylinder auf der Stirnflaeche
@@ -540,30 +543,71 @@ def _baue_vorgelege(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0,
                               welle_d=welle_d + 2.0 * spiel, achse="x"):
         teile.append((label, shp))
 
-    # --- Kupplungsglocke -------------------------------------------------
+    # --- Kupplungsglocke und die beiden Stirnflansche --------------------
+    # Eine Glocke, die man nicht anschrauben kann, ist keine. Sie braucht
+    # hinten einen Flansch, das Getriebegehaeuse vorn einen dazu passenden,
+    # und beide dieselben Schraubenloecher auf demselben Lochkreis. Weil
+    # das Gehaeuse in der Ebene durch beide Wellenachsen geteilt ist (z = 0),
+    # ist auch sein Stirnflansch geteilt: je eine Haelfte an Ober- und
+    # Unterteil.
     if gl > 0.0:
         d_a = float(glocke_d) or (a * 2.0 + 80.0)
-        x_g = -wand - gl
-        glocke = Part.makeCylinder(d_a / 2.0, gl, Vector(x_g, 0, 0),
-                                   Vector(1, 0, 0))
-        glocke = glocke.cut(Part.makeCylinder(
-            d_a / 2.0 - float(wand), gl + 2.0,
-            Vector(x_g - 1.0, 0, 0), Vector(1, 0, 0)))
-        # Anschraubflansch zum Motorblock, vorn.
-        flansch = Part.makeCylinder(d_a / 2.0 + float(flansch_b), wand * 1.5,
-                                    Vector(x_g, 0, 0), Vector(1, 0, 0))
-        flansch = flansch.cut(Part.makeCylinder(
-            d_a / 2.0 - float(wand), wand * 2.0,
-            Vector(x_g - 1.0, 0, 0), Vector(1, 0, 0)))
-        for k in range(10):
-            w = 2.0 * math.pi * k / 10.0
-            r = d_a / 2.0 + float(flansch_b) / 2.0
-            flansch = flansch.cut(Part.makeCylinder(
-                float(schraube_d) / 2.0, wand * 3.0,
-                Vector(x_g - 1.0, r * math.cos(w), r * math.sin(w)),
-                Vector(1, 0, 0)))
-        teile.append(("Kupplungsglocke",
-                      glocke.fuse(flansch).removeSplitter()))
+        t_fl = wand * 1.5                       # Flanschdicke
+        d_fl = d_a + 2.0 * float(flansch_b)     # Flanschaussendurchmesser
+        r_loch = d_a / 2.0 + float(flansch_b) / 2.0
+        n_loch = 12
+        x_h = -wand                             # Stirnflaeche des Gehaeuses
+        x_g = x_h - (gl + 2.0 * t_fl)           # vorderste Ebene der Glocke
+
+        def loecher(koerper, x_von, laenge):
+            for k in range(n_loch):
+                w = 2.0 * math.pi * k / n_loch
+                koerper = koerper.cut(Part.makeCylinder(
+                    float(schraube_d) / 2.0, laenge,
+                    Vector(x_von, r_loch * math.cos(w),
+                           r_loch * math.sin(w)), Vector(1, 0, 0)))
+            return koerper
+
+        def scheibe(x_von, dicke, d_aussen, d_innen):
+            k = Part.makeCylinder(d_aussen / 2.0, dicke, Vector(x_von, 0, 0),
+                                  Vector(1, 0, 0))
+            if d_innen > 0.0:
+                k = k.cut(Part.makeCylinder(d_innen / 2.0, dicke + 2.0,
+                                            Vector(x_von - 1.0, 0, 0),
+                                            Vector(1, 0, 0)))
+            return k
+
+        # Die beiden Flansche liegen ANEINANDER, nicht aufeinander: der der
+        # Glocke endet dort, wo der des Gehaeuses beginnt. Uebereinander
+        # gelegt durchdrangen sie sich zu 20 %.
+        x_stoss = x_h - t_fl          # die Trennebene der Verschraubung
+        mantel = scheibe(x_g, x_stoss - x_g, d_a, d_a - 2.0 * float(wand))
+        # vorn zum Motorblock, hinten zum Getriebegehaeuse
+        vorn = scheibe(x_g, t_fl, d_fl, d_a - 2.0 * float(wand))
+        hinten = scheibe(x_stoss - t_fl, t_fl, d_fl,
+                         d_a - 2.0 * float(wand))
+        glocke = mantel.fuse(vorn).fuse(hinten).removeSplitter()
+        glocke = loecher(glocke, x_g - 1.0, t_fl + 2.0)
+        glocke = loecher(glocke, x_stoss - t_fl - 1.0, t_fl + 2.0)
+        teile.append(("Kupplungsglocke", glocke))
+
+        # Der Gegenflansch am Getriebegehaeuse, GETEILT wie das Gehaeuse.
+        stirn = scheibe(x_stoss, t_fl, d_fl, 0.0)
+        # Die beiden Wellen gehen hindurch.
+        for y in (0.0, a):
+            stirn = stirn.cut(Part.makeCylinder(
+                welle_d / 2.0 + float(spiel) + 1.0, t_fl + 2.0,
+                Vector(x_stoss - 1.0, y, 0.0), Vector(1, 0, 0)))
+        stirn = loecher(stirn, x_stoss - 1.0, t_fl + 2.0)
+        # Teilen in der Ebene durch beide Wellenachsen, also bei z = 0 —
+        # derselben Ebene, in der auch das Gehaeuse geteilt ist.
+        gross = d_fl + 20.0
+        for name, z0 in (("oben", 0.0), ("unten", -gross)):
+            halb = stirn.common(Part.makeBox(
+                t_fl + 4.0, gross * 2.0, gross,
+                Vector(x_stoss - 2.0, -gross, z0)))
+            if halb.Volume > 1.0:
+                teile.append(("Gehaeuse Stirnflansch %s" % name, halb))
 
     return teile
 

@@ -58,7 +58,7 @@ def baue(bauform="R4", hub=86.0, zylinderabstand=91.0, hauptlager_d=54.0,
          hubzapfen_d=48.0, hubzapfen_b=26.0, hauptlager_b=26.0, wange_t=18.0,
          wange_b=0.0, gegengewicht=True, flansch_d=110.0, flansch_t=12.0,
          steuertrieb_d=30.0, steuertrieb_l=30.0, v8_kreuzebene=True,
-         bankwinkel=0.0, name="Kurbelwelle"):
+         bankwinkel=0.0, zentrier_d=0.0, name="Kurbelwelle"):
     """Eine Kurbelwelle als :class:`Bauteil`.
 
     bauform          R2 … V12 (siehe :mod:`kt_bauformen`)
@@ -68,6 +68,9 @@ def baue(bauform="R4", hub=86.0, zylinderabstand=91.0, hauptlager_d=54.0,
     hubzapfen_d      Durchmesser der Hubzapfen [mm]
     wange_t          Dicke einer Kurbelwange [mm]
     gegengewicht     Gegengewichte an den Wangen anformen
+    zentrier_d       Durchmesser der Zentrierbohrung im Schwungradflansch
+                     [mm]; 0 = 0,30 · Flanschdurchmesser. Dort sitzt das
+                     Pilotlager der Getriebeeingangswelle.
     """
     r = float(hub) / 2.0
     n = B.zapfenzahl(bauform, bankwinkel)
@@ -202,9 +205,18 @@ def baue(bauform="R4", hub=86.0, zylinderabstand=91.0, hauptlager_d=54.0,
     x += lager_b
 
     # Schwungradflansch hinten
-    teile.append(("Flansch", Part.makeCylinder(
-        float(flansch_d) / 2.0, float(flansch_t), Vector(x, 0, 0),
-        Vector(1, 0, 0))))
+    # Der Schwungradflansch hat eine ZENTRIERBOHRUNG: dort steckt das
+    # Pilotlager, in dem sich die Getriebeeingangswelle abstuetzt. Ohne sie
+    # stiess deren Nase ins Vollmaterial (gemessen 3,3 % Durchdringung) —
+    # und ohne diese Abstuetzung waere die Eingangswelle nur einseitig
+    # gelagert.
+    zd = float(zentrier_d) or round(float(flansch_d) * 0.30, 1)
+    flansch = Part.makeCylinder(float(flansch_d) / 2.0, float(flansch_t),
+                                Vector(x, 0, 0), Vector(1, 0, 0))
+    flansch = flansch.cut(Part.makeCylinder(
+        zd / 2.0, float(flansch_t) + 2.0, Vector(x - 1.0, 0, 0),
+        Vector(1, 0, 0)))
+    teile.append(("Flansch", flansch))
     punkte.append(Punkt("abtrieb", (x + float(flansch_t), 0, 0), (1, 0, 0),
                         "flaeche", float(flansch_d),
                         "Schwungradflansch"))

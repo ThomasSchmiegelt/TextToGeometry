@@ -701,8 +701,18 @@ clutch. Three dimensions had to follow, and the interference check found each
 one: the flywheel's **pilot bore goes through** (a blind bore from 30 % depth
 left the shaft in solid metal, 4.0 %); the **hub needs running clearance**
 (2.9 % at zero fit — and it must slide axially or the clutch cannot be
-released); and the input shaft's **bearing seat belongs at the housing wall**,
-not at the shaft nose, where the hub ran on the 30 mm shoulder.
+released); the input shaft's **bearing seat belongs at the housing wall**,
+not at the shaft nose, where the hub ran on the 30 mm shoulder; and the
+crankshaft's **flywheel flange needs its spigot bore**, or the shaft nose
+ends in solid crankshaft (3.3 %) — that bore is where the pilot bearing sits,
+and without it the input shaft would be supported at one end only.
+
+A bell you cannot bolt on is not a bell: it carries **two** flanges — front
+to the engine block, rear to the gearbox housing — and the housing carries a
+matching **end flange**, split at z = 0 like the housing itself, so each half
+gets its half. All three share one bolt circle and twelve holes, and the two
+middle ones sit **face to face**, not on top of each other (20 % when laid
+over one another; measured now, 775 meets 775).
 
 **The planetary gear.** Four conditions, three of them purely geometric, and
 a set that breaks any one of them cannot be built:

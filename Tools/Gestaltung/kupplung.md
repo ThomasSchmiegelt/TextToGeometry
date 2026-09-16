@@ -89,7 +89,20 @@ Nachgemessen am V12: Glocke 112 mm lang, Kupplung x 662…774 darin,
 Antriebswelle x 654…873 trägt beide Scheibennaben, Getriebe insgesamt 661 mm
 (79 % der Motorlänge).
 
-Drei Maße mussten dafür stimmen, und jedes hat die Prüfung gefunden:
+### Angeflanscht, nicht angestoßen
+
+Eine Glocke, die man nicht anschrauben kann, ist keine. Sie hat deshalb
+**zwei** Flansche — vorn zum Motorblock, hinten zum Getriebegehäuse — und das
+Getriebegehäuse einen dazu passenden **Stirnflansch**. Weil das Gehäuse in
+der Ebene durch beide Wellenachsen geteilt ist (z = 0), ist auch sein
+Stirnflansch geteilt: je eine Hälfte an Ober- und Unterteil.
+
+Alle drei Flansche haben denselben Lochkreis und dieselben zwölf Bohrungen,
+und die beiden mittleren liegen **aneinander**, nicht aufeinander —
+übereinander gelegt durchdrangen sie sich zu 20 %. Nachgemessen stoßen sie
+bei x = 775 auf x = 775 zusammen.
+
+Vier Maße mussten dafür stimmen, und jedes hat die Prüfung gefunden:
 
 - Die **Pilotbohrung im Schwungrad geht durch** — als Sackloch ab 30 % der
   Dicke stieß die Eingangswelle auf Vollmaterial (4,0 %). Dort sitzt das
@@ -100,6 +113,11 @@ Drei Maße mussten dafür stimmen, und jedes hat die Prüfung gefunden:
 - Der **Lagersitz der Eingangswelle gehört an die Gehäusewand**, nicht an die
   Wellennase. Mit dem Sitz vorn (30 mm unter 29-mm-Nabenbohrung) lief die
   Nabe auf dem Absatz.
+- Der **Schwungradflansch der Kurbelwelle braucht seine Zentrierbohrung**.
+  Sobald die Eingangswelle durch die ganze Glocke bis ans Schwungrad reicht,
+  stößt ihre Nase sonst ins Vollmaterial der Kurbelwelle (3,3 %). Dort sitzt
+  das Pilotlager — und ohne diese Abstützung wäre die Eingangswelle nur
+  einseitig gelagert.
 
 ## Was offen bleibt
 

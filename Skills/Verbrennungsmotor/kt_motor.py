@@ -203,6 +203,13 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
                                                tiefe, ventilwinkel, hub_v)
         k["taschentiefe"] = tiefe
 
+    # Die Zentrierbohrung im Schwungradflansch nimmt die Nase der
+    # Getriebeeingangswelle auf; ihr Durchmesser folgt also dem Getriebe.
+    zentrier_d = 0.0
+    if mit_kupplung or mit_getriebe:
+        zentrier_d = round(getriebe_auslegung(
+            k["hubraum_cm3"], getriebe_welle_d, getriebe_modul,
+            getriebe_zaehne_summe, getriebe_gaenge)["welle_d"] + 1.0, 1)
     teile, proben, kw, zylinder_x = kt_kurbeltrieb.baue(
         bauform=bauform, bohrung=bohrung, hub=hub, stichmass=l,
         kompressionshoehe=a["kompressionshoehe"], zylinderabstand=za,
@@ -215,7 +222,7 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
         kolben_feuersteg=a["kolben_feuersteg"],
         kolben_ringsteg=a["kolben_ringsteg"],
         kolben_desachsierung=a["kolben_desachsierung"],
-        bankwinkel=bankwinkel,
+        zentrier_d=zentrier_d, bankwinkel=bankwinkel,
         v8_kreuzebene=v8_kreuzebene, ventiltaschen=taschen)
 
     if mit_ventiltrieb:
@@ -436,7 +443,14 @@ def _getriebe_anflanschen(abtrieb, k, doc, gaenge=5, welle_d=0.0, modul=0.0,
     wellen = [s for n, s in teile if "welle" in n.lower()]
     if not wellen:
         return []
-    anfang = min(s.BoundBox.XMin for s in wellen)
+    # Mit Glocke ist deren VORDERSTE Ebene die Anschlussflaeche zum Motor,
+    # nicht das Wellenende: dort liegt ihr Flansch am Block an. Ohne Glocke
+    # bleibt es die Welle.
+    glocke = [s for n, s in teile if n == "Kupplungsglocke"]
+    if glocke:
+        anfang = glocke[0].BoundBox.XMin
+    else:
+        anfang = min(s.BoundBox.XMin for s in wellen)
     versatz = FreeCAD.Vector(abtrieb.ort.x + float(versatz_x) - anfang,
                              0.0, 0.0)
     # Erst DREHEN, dann schieben: die Drehung geht um die Kurbelwellenachse
@@ -669,6 +683,20 @@ def pruefe(teile=None, proben=None, kenn=None, toleranz=0.02, **kw):
                 "die Kupplungsglocke (%.0f mm) umschliesst die Kupplung "
                 "(%.0f mm)" % (g.get("glocke_l", 0.0), ku["laenge"]))
             glocke = [sh for n, sh in teile if n.endswith("Kupplungsglocke")]
+            stirn = [sh for n, sh in teile
+                     if "Stirnflansch" in n]
+            sag(len(stirn) == 2,
+                "das Getriebegehaeuse hat beide Stirnflanschhaelften (%d)"
+                % len(stirn))
+            if glocke and stirn:
+                gb = glocke[0].BoundBox
+                for sh in stirn:
+                    sb = sh.BoundBox
+                    sag(abs(sb.XMin - (gb.XMax - 0.0)) < 25.0 or
+                        sb.XMin >= gb.XMin,
+                        "Stirnflansch und Glocke stossen aneinander "
+                        "(x %.0f gegen %.0f)" % (sb.XMin, gb.XMax))
+                    break
             naben = [sh for n, sh in teile
                      if "Scheibennabe" in n]
             welle = [sh for n, sh in teile if n.endswith("Antriebswelle")]
