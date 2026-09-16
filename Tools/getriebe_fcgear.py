@@ -98,10 +98,20 @@ def zahnrad(doc, zaehne, modul, breite, bohrung, verzahnung="gerade",
             FreeCAD.setActiveDocument(vorher.Name)
 
 
-def _welle(laenge, d, sitz_d, sitz_l):
-    """Welle mit abgesetzten Lagersitzen, entlang Z gebaut."""
+def _welle(laenge, d, sitz_d, sitz_l, sitze="beide"):
+    """Welle mit abgesetzten Lagersitzen, entlang Z gebaut.
+
+    ``sitze`` sagt, welche Enden ein Lager tragen: ``"beide"``, ``"vorn"``
+    (nur bei z = 0) oder ``"hinten"``. Beim Vorgelegegetriebe sitzt am
+    hinteren Ende der Antriebswelle **kein Lager**, sondern die
+    Kupplungsverzahnung für den direkten Gang — dort schiebt sich die
+    Schaltmuffe darüber. Mit einem Lagersitz von 30 mm unter einer 29er
+    Muffenbohrung durchdrangen sich beide um 4 %.
+    """
     k = Part.makeCylinder(d / 2.0, laenge)
-    for z in (0.0, laenge - sitz_l):
+    enden = {"beide": (0.0, laenge - sitz_l), "vorn": (0.0,),
+             "hinten": (laenge - sitz_l,)}[str(sitze)]
+    for z in enden:
         absatz = Part.makeCylinder(d / 2.0 + 1.0, sitz_l, Vector(0, 0, z))
         sitz = Part.makeCylinder(sitz_d / 2.0, sitz_l, Vector(0, 0, z))
         k = k.cut(absatz).fuse(sitz)
@@ -137,8 +147,52 @@ def kennwerte(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
     }
 
 
+def gangpaare_vorgelege(zaehne_summe, gaenge, z_min=17,
+                        zaehne_konstante=0):
+    """Zähnezahlen eines **Vorgelegegetriebes**, Gang für Gang.
+
+    Der Kraftfluss geht hier über **zwei** Radpaare, nicht über eines:
+
+        Antriebswelle --(Konstante)--> Vorgelegewelle --(Gangpaar)--> Hauptwelle
+
+    Die Antriebswelle und die Hauptwelle liegen auf **derselben Achse**; das
+    ist der Sinn der Bauart, denn nur so geht der Abtrieb dorthin zurück, wo
+    der Antrieb herkommt. Die Vorgelegewelle liegt darunter.
+
+    Alle Paare — auch die Konstante — laufen auf demselben Achsabstand, also
+    ist ``z1 + z2`` überall dieselbe Summe.
+
+    Die Gesamtübersetzung eines Ganges ist das **Produkt** beider Stufen:
+
+        i = (z_VK / z_AK) · (z_Losrad / z_Festrad)
+
+    Zurück kommt ``(konstante, paare)`` mit ``konstante = (z_AK, z_VK, i_K)``
+    und ``paare = [(z_Festrad, z_Losrad, i_gesamt), …]``, vom längsten zum
+    kürzesten Gang.
+    """
+    summe = int(zaehne_summe)
+    n = max(1, int(gaenge))
+    zk = int(zaehne_konstante) or max(int(z_min), summe // 2 - 2)
+    if summe - zk < int(z_min):
+        raise ValueError("Zaehnesumme %d zu klein fuer die Konstante" % summe)
+    konstante = (zk, summe - zk, G.uebersetzung(zk, summe - zk))
+    i_k = konstante[2]
+    # Das Festrad auf der Vorgelegewelle waechst von Gang zu Gang, das
+    # Losrad auf der Hauptwelle schrumpft — der erste Gang ist der laengste.
+    paare = []
+    schritt = max(1, (summe - 2 * int(z_min)) // (2 * n) or 1)
+    for k in range(n):
+        z_fest = int(z_min) + k * schritt
+        z_los = summe - z_fest
+        if z_los < int(z_min):
+            raise ValueError("Zaehnezahl unter Minimum bei Gang %d" % (k + 1))
+        paare.append((z_fest, z_los,
+                      round(i_k * G.uebersetzung(z_fest, z_los), 4)))
+    return konstante, paare
+
+
 def baue(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
-         z_min=12,
+         z_min=12, bauart="zweiwellen",
          verzahnung="gerade", schraegwinkel=15.0, eingriffswinkel=20.0,
          flankenspiel=0.05, welle_d=20.0, lager_reihe="62", spiel=0.1,
          gehaeuse_luft=3.0, wand=4.0, flansch_b=12.0, schraube_d=6.0,
@@ -162,9 +216,35 @@ def baue(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
     gehaeuse_luft  Freigang Rad -> Gehäuseinnenwand [mm]
     wand           Wandstärke [mm]
     muffe_b        Breite der Schaltmuffe [mm]; 0 = in die Lücke einpassen
+    bauart         "zweiwellen" | "vorgelege"
+
+                   **zweiwellen** — Eingangs- und Ausgangswelle parallel,
+                   jeder Gang ein einziges Radpaar. Das ist die Bauform des
+                   quer eingebauten Frontantriebs, wo der Abtrieb ohnehin
+                   seitlich zum Differential geht.
+
+                   **vorgelege** — Antriebswelle und Hauptwelle auf
+                   **derselben Achse**, die Vorgelegewelle darunter. Der
+                   Kraftfluss geht über die Antriebskonstante auf die
+                   Vorgelegewelle und von dort über das Gangpaar zurück auf
+                   die Hauptwelle; die Übersetzung ist das Produkt beider
+                   Stufen. Das ist die Bauform des längs eingebauten
+                   Motors, und nur sie bringt den Abtrieb dorthin zurück, wo
+                   der Antrieb herkommt. Dazu gehört der **direkte Gang**:
+                   die Schaltmuffe kuppelt Antriebswelle und Hauptwelle
+                   unmittelbar, die Vorgelegewelle läuft leer mit, i = 1.
     """
     gaenge = max(1, int(gaenge))
     doc = doc or FreeCAD.ActiveDocument or FreeCAD.newDocument("Getriebe")
+    if str(bauart).lower().strip() == "vorgelege":
+        return _baue_vorgelege(
+            gaenge=gaenge, modul=modul, zaehne_summe=zaehne_summe,
+            breite=breite, luft=luft, z_min=z_min, verzahnung=verzahnung,
+            schraegwinkel=schraegwinkel, eingriffswinkel=eingriffswinkel,
+            flankenspiel=flankenspiel, welle_d=welle_d,
+            lager_reihe=lager_reihe, spiel=spiel,
+            gehaeuse_luft=gehaeuse_luft, wand=wand, flansch_b=flansch_b,
+            schraube_d=schraube_d, muffe_b=muffe_b, doc=doc)
 
     paare = G.gangpaare(int(zaehne_summe), gaenge, int(z_min))
     a = G.achsabstand(modul, *paare[0][:2])
@@ -271,6 +351,161 @@ def baue(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
                 teile.append(("%s %s %s" % (label, welle, seite), shp))
 
     # --- Gehäuse ---------------------------------------------------------
+    for label, shp in GK.baue([(0.0, 0.0), (0.0, a)], abschnitte=abschnitte,
+                              wand=wand, flansch_b=flansch_b,
+                              schraube_d=schraube_d,
+                              welle_d=welle_d + 2.0 * spiel, achse="x"):
+        teile.append((label, shp))
+
+    return teile
+
+
+def _baue_vorgelege(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0,
+                    luft=6.0, z_min=17, verzahnung="gerade",
+                    schraegwinkel=15.0, eingriffswinkel=20.0,
+                    flankenspiel=0.05, welle_d=20.0, lager_reihe="62",
+                    spiel=0.1, gehaeuse_luft=3.0, wand=4.0, flansch_b=12.0,
+                    schraube_d=6.0, muffe_b=0.0, doc=None):
+    """Das Vorgelegegetriebe — Antriebswelle und Hauptwelle auf einer Achse.
+
+    Aufbau entlang +X, vom Motor her gesehen:
+
+        [Lager] [Konstantenpaar] [Muffe direkt/1] [Gang 1] … [Gang n] [Lager]
+          y = 0:  Antriebswelle ──┤ Spigot ├── Hauptwelle mit den Losraedern
+          y = a:  Vorgelegewelle mit dem Konstantenrad und den Festraedern
+
+    Die **Antriebswelle** reicht nur bis hinter das Konstantenrad und stützt
+    sich mit einem Zapfen in der Hauptwelle ab; von da an ist die Hauptwelle
+    der Abtrieb. Beide liegen auf y = 0, und genau darum geht der Abtrieb
+    dorthin zurück, wo der Antrieb herkommt.
+
+    Die **Losräder** sitzen auf der Hauptwelle und laufen frei, bis eine
+    Schaltmuffe sie mit ihr kuppelt. Die **Festräder** sitzen auf der
+    Vorgelegewelle. Die erste Muffe kuppelt nach vorn die Antriebswelle
+    selbst — das ist der **direkte Gang**, i = 1, und dabei läuft die
+    Vorgelegewelle leer mit.
+    """
+    doc = doc or FreeCAD.ActiveDocument or FreeCAD.newDocument("Getriebe")
+    konstante, paare = gangpaare_vorgelege(int(zaehne_summe), int(gaenge),
+                                           int(z_min))
+    a = G.achsabstand(modul, konstante[0], konstante[1])
+    schritt = float(breite) + float(luft)
+    welle_r = welle_d / 2.0 + spiel
+
+    lager_name = LG.waehle(welle_d, lager_reihe)
+    lm = LG.masse(lager_name)
+    sitz_r = lm["D"] / 2.0
+
+    teile = []
+
+    def lege_ab(shape, label, pos, drehen=True, phase=0.0):
+        s = shape.copy()
+        if phase:
+            s.rotate(Vector(0, 0, 0), Vector(0, 0, 1), float(phase))
+        if drehen:
+            s.rotate(Vector(0, 0, 0), Vector(0, 1, 0), 90)
+        s.translate(Vector(*pos))
+        teile.append((label, s))
+
+    def paar(z_oben, z_unten, x, label_oben, label_unten):
+        """Ein Radpaar: oben auf y = 0, unten auf der Vorgelegewelle."""
+        oben, _d1, d_a1 = zahnrad(doc, z_oben, modul, breite, welle_d,
+                                  verzahnung, schraegwinkel,
+                                  eingriffswinkel, flankenspiel)
+        # Gegenlaeufig schraegverzahnt, sonst kaemmen sie nicht.
+        unten, _d2, d_a2 = zahnrad(doc, z_unten, modul, breite,
+                                   welle_d + 2.0 * spiel, verzahnung,
+                                   -float(schraegwinkel), eingriffswinkel,
+                                   flankenspiel)
+        lege_ab(oben, label_oben, (x, 0.0, 0.0))
+        # Halbe Zahnteilung Phase, sonst stossen die Zaehne aufeinander.
+        lege_ab(unten, label_unten, (x, a, 0.0),
+                phase=180.0 / float(z_unten))
+        return [d_a1 / 2.0 + float(gehaeuse_luft),
+                d_a2 / 2.0 + float(gehaeuse_luft)]
+
+    # --- Abschnitte des Gehaeuses, x = 0 ist der Anfang des Hohlraums ----
+    abschnitte = [(lm["B"], [sitz_r, sitz_r])]
+    vorlauf = lm["B"] + wand
+
+    # Konstantenpaar: Festrad auf der Antriebswelle, Festrad auf dem
+    # Vorgelege. Es sitzt ganz vorn, also motorseitig.
+    x_k = vorlauf + luft / 2.0
+    raum_k = paar(konstante[0], konstante[1], x_k,
+                  "Antriebskonstante (z=%d)" % konstante[0],
+                  "Vorgelegekonstante (z=%d)" % konstante[1])
+    abschnitte.append((wand, [welle_r, welle_r],
+                       [r + wand for r in raum_k]))
+    abschnitte.append((schritt, raum_k))
+
+    # --- Gangpaare -------------------------------------------------------
+    raum = raum_k
+    for k, (z_fest, z_los, i) in enumerate(paare):
+        x = x_k + (k + 1) * schritt
+        raum = paar(z_los, z_fest, x,
+                    "Gang %d Losrad (z=%d, i=%.3f)" % (k + 1, z_los, i),
+                    "Gang %d Festrad (z=%d)" % (k + 1, z_fest))
+        abschnitte.append((schritt, raum))
+    abschnitte.append((wand, [welle_r, welle_r], [r + wand for r in raum]))
+    abschnitte.append((lm["B"], [sitz_r, sitz_r]))
+    innen_l = sum(x[0] for x in abschnitte)
+
+    # --- Wellen ----------------------------------------------------------
+    ueberstand = 8.0
+    x_welle = -(wand + ueberstand)
+    sitz_l = wand + ueberstand + lm["B"]
+    ganz = innen_l + 2.0 * wand + 2.0 * ueberstand
+
+    # Die Antriebswelle endet HINTER dem Konstantenrad; dort beginnt die
+    # Hauptwelle. Ohne diesen Schnitt waere es eine durchgehende Welle, und
+    # dann gaebe es keinen Gang ausser dem direkten.
+    trennung = x_k + breite + luft / 2.0
+    antrieb_l = trennung - x_welle
+    # Nur vorn ein Lagersitz: hinten kommt die Kupplungsverzahnung, ueber
+    # die die Muffe im direkten Gang greift.
+    lege_ab(_welle(antrieb_l, welle_d, lm["d"], sitz_l, sitze="vorn"),
+            "Antriebswelle", (x_welle, 0.0, 0.0))
+    # Zapfen: die Antriebswelle stuetzt sich in der Hauptwelle ab. Er
+    # braucht dort eine BOHRUNG — als blosser Zylinder auf der Stirnflaeche
+    # stak er zu 100 % im Vollmaterial. Das ist das Pilotlager des echten
+    # Getriebes: die Hauptwelle ist vorn aufgebohrt, der Zapfen laeuft
+    # darin, und beide drehen im direkten Gang gemeinsam.
+    zapfen_d = welle_d * 0.3
+    zapfen_l = float(luft) * 0.8
+    lege_ab(Part.makeCylinder(zapfen_d / 2.0, zapfen_l),
+            "Zentrierzapfen", (trennung, 0.0, 0.0))
+    haupt_l = ganz - antrieb_l
+    # Die Hauptwelle traegt ihr Lager nur hinten; vorn steckt sie auf dem
+    # Zapfen der Antriebswelle.
+    haupt = _welle(haupt_l, welle_d, lm["d"], sitz_l, sitze="hinten")
+    haupt = haupt.cut(Part.makeCylinder(zapfen_d / 2.0 + float(spiel),
+                                        zapfen_l + float(spiel),
+                                        Vector(0, 0, -0.001)))
+    lege_ab(haupt, "Hauptwelle", (trennung, 0.0, 0.0))
+    lege_ab(_welle(ganz, welle_d, lm["d"], sitz_l), "Vorgelegewelle",
+            (x_welle, a, 0.0))
+
+    # --- Schaltmuffen auf der HAUPTWELLE ---------------------------------
+    # Die erste kuppelt nach vorn die Antriebswelle selbst: direkter Gang.
+    platz = float(luft) - 2.0 * float(spiel)
+    breite_muffe = float(muffe_b) if float(muffe_b) > 0.0 else platz
+    breite_muffe = max(2.0, min(breite_muffe, platz))
+    namen = ["direkt/1"] + ["%d/%d" % (k + 1, k + 2)
+                            for k in range(len(paare) - 1)]
+    for k, name in enumerate(namen):
+        x = x_k + k * schritt + breite + (luft - breite_muffe) / 2.0
+        lege_ab(_schaltmuffe(welle_d + 2.0 * spiel, welle_d + 12.0,
+                             breite_muffe),
+                "Schaltmuffe %s" % name, (x, 0.0, 0.0))
+
+    # --- Lager -----------------------------------------------------------
+    for seite, x in (("links", 0.0), ("rechts", innen_l - lm["B"])):
+        for welle, y in (("Hauptwelle", 0.0), ("Vorgelege", a)):
+            for label, shp in LG.baue(lager_name, spiel=spiel, achse="x",
+                                      x=x, y=y, z=0.0):
+                teile.append(("%s %s %s" % (label, welle, seite), shp))
+
+    # --- Gehaeuse --------------------------------------------------------
     for label, shp in GK.baue([(0.0, 0.0), (0.0, a)], abschnitte=abschnitte,
                               wand=wand, flansch_b=flansch_b,
                               schraube_d=schraube_d,

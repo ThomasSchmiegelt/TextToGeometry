@@ -334,6 +334,10 @@ def getriebe_auslegung(hubraum_cm3, welle_d=0.0, modul=0.0, zaehne_summe=0,
         "schraube_d": round(max(6.0, 0.28 * d), 1),
         "lager_reihe": "63" if d >= 25.0 else "62",
         "z_min": Z_MIN,
+        # Laengs eingebauter Motor: der Abtrieb muss dorthin zurueck, wo der
+        # Antrieb herkommt. Das kann nur das Vorgelegegetriebe — Antriebs-
+        # und Hauptwelle auf EINER Achse, die Vorgelegewelle darunter.
+        "bauart": "vorgelege",
         "drehung": DREHUNG,
         "hubraum_cm3": round(v, 1),
     }
@@ -361,7 +365,13 @@ def _getriebe_anflanschen(abtrieb, k, doc, gaenge=5, welle_d=0.0, modul=0.0,
                     modul=g["modul"], breite=g["breite"], luft=g["luft"],
                     zaehne_summe=g["zaehne_summe"], wand=g["wand"],
                     schraube_d=g["schraube_d"], z_min=g["z_min"],
+                    bauart=g["bauart"],
                     lager_reihe=g["lager_reihe"], doc=doc)
+    konstante, gangpaare = GF.gangpaare_vorgelege(
+        g["zaehne_summe"], int(gaenge), g["z_min"])
+    g["konstante"] = {"zaehne": [konstante[0], konstante[1]],
+                      "i": round(konstante[2], 4)}
+    g["uebersetzungen"] = [round(i, 3) for _f, _l, i in gangpaare] + [1.0]
     # Wo faengt die Eingangswelle des Getriebes in seinem eigenen Bild an?
     wellen = [s for n, s in teile if "welle" in n.lower()]
     if not wellen:
@@ -535,13 +545,38 @@ def pruefe(teile=None, proben=None, kenn=None, toleranz=0.02, **kw):
             g["achsabstand"] >= soll["achsabstand"],
             "Achsabstand %.1f mm (Vorschlag %.1f zu %.1f mm Welle)"
             % (g["achsabstand"], soll["achsabstand"], g["welle_d"]))
+        # Die eigentliche Zusage des Vorgelegegetriebes: Antriebs- und
+        # Hauptwelle liegen auf DERSELBEN Achse. Vorher waren es zwei
+        # parallele Wellen ohne gemeinsame Achse — damit kaeme der Abtrieb
+        # seitlich heraus, und ein laengs eingebauter Motor braucht ihn
+        # hinten auf der Kurbelwellenachse.
+        if g.get("bauart") == "vorgelege":
+            achsen = {}
+            for n, sh in teile:
+                for welle in ("Antriebswelle", "Hauptwelle",
+                              "Vorgelegewelle"):
+                    if n.endswith(welle):
+                        b = sh.BoundBox
+                        achsen[welle] = ((b.YMin + b.YMax) / 2.0,
+                                         (b.ZMin + b.ZMax) / 2.0)
+            if "Antriebswelle" in achsen and "Hauptwelle" in achsen:
+                an, ha = achsen["Antriebswelle"], achsen["Hauptwelle"]
+                ab = math.hypot(an[0] - ha[0], an[1] - ha[1])
+                sag(ab < 0.5,
+                    "Antriebs- und Hauptwelle liegen auf einer Achse "
+                    "(%.2f mm auseinander)" % ab)
+                sag(abs(an[0]) < 0.5 and abs(an[1]) < 0.5,
+                    "die Antriebswelle liegt auf der Kurbelwellenachse "
+                    "(y %.2f, z %.2f)" % an)
+
         # Die Vorgelegewelle gehoert SENKRECHT ueber oder unter die
         # Kurbelwellenachse, nicht seitlich daneben — dort steht beim
         # V-Motor die Zylinderbank. Gebaut wird sie in +Y; die Drehung um
         # die Kurbelwellenachse bringt sie auf die Senkrechte, und ob nach
         # oben oder unten, ist Sache des Einbaus (DREHUNG).
         wellen_g = [sh for n, sh in teile
-                    if n.startswith("Getriebe") and "welle" in n.lower()]
+                    if n.startswith("Getriebe") and "welle" in n.lower()
+                    and "kurbel" not in n.lower()]
         if len(wellen_g) >= 2:
             lagen = [((b.YMin + b.YMax) / 2.0, (b.ZMin + b.ZMax) / 2.0)
                      for b in (sh.BoundBox for sh in wellen_g)]
