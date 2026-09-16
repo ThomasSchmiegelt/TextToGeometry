@@ -628,6 +628,23 @@ Two things that only showed once the gearbox got real size:
   (countershaft above); which way round is an installation choice, so
   `pruefe()` checks only that it is *perpendicular*: `|y| < 1 mm` and
   `|z| = centre distance`.
+- **The whole layout was wrong for a longitudinal engine.** It had two
+  parallel shafts and one gear pair per gear, so the output came out
+  sideways — that is the *transaxle* of a transverse front-wheel drive, where
+  the output goes to the differential anyway. A longitudinal engine needs the
+  output back on the crank axis, and only the **countershaft gearbox**
+  (Vorgelegegetriebe) does that: input shaft and main shaft on **one** axis,
+  countershaft offset. Power runs input → constant-mesh pair → countershaft →
+  gear pair → main shaft, so the ratio is the **product** of two stages,
+  `i = (z_VK/z_AK)·(z_loose/z_fixed)`. The frontmost sleeve bridges the shaft
+  joint and couples input to main shaft directly: the **direct gear**, i = 1,
+  with the countershaft idling. `getriebe_fcgear.baue` takes
+  `bauart="zweiwellen"` (unchanged default) or `"vorgelege"`; the engine uses
+  the latter. Two details the interference check found: the pilot spigot
+  needs a **bore** in the main shaft (it sat 100 % in solid metal), and the
+  input shaft's rear end carries the **coupling teeth, not a bearing seat**
+  — a 30 mm seat under a 29 mm sleeve bore overlapped by 4 %, so `_welle()`
+  now takes `sitze="beide|vorn|hinten"`.
 - **A 12-tooth gear undercuts.** `gangpaare` had `z_min = 12`, which is
   geometrically possible but below the limit for a 20° involute without
   profile shift; the mating tip digs into the root. Measured on a 12/57
@@ -654,6 +671,45 @@ Two axis conventions bit here, both silently:
 And a measurement trap: a camshaft's axis is **not** its bounding-box centre —
 the lobes stick out on one side and move it 5.5 mm. Take the drive journal at
 the −x end, which is a plain cylinder on the axis.
+
+### Clutch and planetary gear
+
+`Tools/kupplung.py` and `Tools/planetengetriebe.py`, with their design notes
+in `Tools/Gestaltung/*.md`. Both are sized from formulas, not from taste.
+
+**The clutch.** `M = z·μ·F_N·r_m` with `r_m = (D_a + D_i)/4`, and `z` is the
+number of **friction faces** — one disc rubs on *both* sides, so z = 2. Clamp
+load goes with area (∝ D²) and the radius with D, so torque goes with **D³**
+and the lining diameter with the cube root of it. The same relation settles
+the disc count: a second disc doubles z and therefore shrinks the lining by
+`2^(1/3) = 0.794`. That is exactly why big engines get two discs instead of
+one huge one — measured on the 6-litre V12: 310 mm on one disc against
+**246 mm on two**, which is the realistic size. `auslegen()` switches by
+itself above 280 mm.
+
+Two pieces of geometry that are obvious in the real part and only show up
+when you measure the model: the **damper springs need punched windows** in
+the lining carrier (33 % interference without them), and the **flywheel needs
+a stepped central recess** for the disc hub (20 %).
+
+**The planetary gear.** Four conditions, three of them purely geometric, and
+a set that breaks any one of them cannot be built:
+
+```
+Achsbedingung    z_ring = z_sun + 2·z_planet
+Montagebedingung (z_sun + z_ring) / p  integer
+Nachbarbedingung (z_sun + z_planet)·sin(π/p) > z_planet + 2
+Willis           i₀ = −z_ring/z_sun, ring fixed → i = 1 − i₀
+```
+
+`baue()` refuses a set that violates the assembly or neighbour condition
+instead of building overlapping wheels, and `vorschlag(i_soll)` searches only
+among sets that hold all three — measured, it hits i = 3, 4, 5 and 6 exactly.
+The planet **phase is not free**: a planet at angle φ must mesh with the sun
+there, so it stands rotated by `φ·z_sun/z_planet` (measured: 119.9 / 120.0 /
+120.1°). And the carrier cheeks need **bores for the planet pins** — without
+them the pin sat 21 % inside solid metal, and those bores are precisely what
+makes a carrier a carrier.
 
 ### Fits, and why they matter to the checks
 

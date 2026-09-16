@@ -121,7 +121,8 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
          bankwinkel=0.0, v8_kreuzebene=True, mit_ventiltrieb=True,
          mit_getriebe=False, getriebe_gaenge=5, getriebe_welle_d=0.0,
          getriebe_modul=0.0, getriebe_zaehne_summe=0,
-         getriebe_drehung=None, doc=None):
+         getriebe_drehung=None, mit_kupplung=False, kupplung_scheiben=0,
+         doc=None):
     """Ein vollständiger Motor als Liste von (Bezeichnung, Shape).
 
     bauform             R2 … V12
@@ -150,6 +151,11 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
                         90 Grad, und der Hubzapfenversatz folgt daraus
                         (|720/z − bank|): 90-Grad-V6 → 30 Grad Versatz.
     mit_ventiltrieb     False baut nur Kurbelwelle, Pleuel und Kolben
+    mit_kupplung        True setzt die Einscheiben- oder
+                        Zweischeibenkupplung aus Tools/kupplung.py an den
+                        Schwungradflansch; das Getriebe rückt dann um ihre
+                        Baulänge nach hinten
+    kupplung_scheiben   1 oder 2; 0 = aus dem Hubraum entscheiden
     mit_getriebe        True flanscht das Getriebe aus getriebe_fcgear an
                         den Schwungradflansch — beide laufen in der
                         Normallage entlang X auf derselben Achse. Seine
@@ -226,11 +232,21 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
         proben.extend(vt_proben)
         k.update(vt_kenn)
 
+    kupplung_l = 0.0
+    if mit_kupplung or mit_getriebe:
+        g_soll = getriebe_auslegung(k["hubraum_cm3"], getriebe_welle_d,
+                                    getriebe_modul, getriebe_zaehne_summe,
+                                    getriebe_gaenge)
+        if mit_kupplung:
+            k_teile, kupplung_l = _kupplung_anflanschen(
+                kw.punkt("abtrieb"), k, doc, g_soll["welle_d"],
+                kupplung_scheiben)
+            teile.extend(k_teile)
     if mit_getriebe:
         teile.extend(_getriebe_anflanschen(
             kw.punkt("abtrieb"), k, doc, getriebe_gaenge,
             getriebe_welle_d, getriebe_modul, getriebe_zaehne_summe,
-            getriebe_drehung))
+            getriebe_drehung, versatz_x=kupplung_l))
     return teile, k, proben
 
 
@@ -343,8 +359,39 @@ def getriebe_auslegung(hubraum_cm3, welle_d=0.0, modul=0.0, zaehne_summe=0,
     }
 
 
+def _kupplung_anflanschen(abtrieb, k, doc, welle_d, scheiben=0):
+    """Die Kupplung aus Tools/kupplung.py an den Schwungradflansch setzen.
+
+    Sie wird entlang +X gebaut, x = 0 ist ihre Schwungradrückseite — also
+    genau die Fläche, die am Flansch anliegt. Es genügt eine Verschiebung.
+
+    Zurück kommt ``(teile, laenge)``; um ``laenge`` rückt das Getriebe nach
+    hinten, denn die Kupplung sitzt zwischen beiden. Ohne diese Verschiebung
+    stünde das Getriebe mitten in der Kupplung.
+    """
+    import kupplung as KU
+
+    teile, a = KU.baue(hubraum_cm3=k.get("hubraum_cm3", 2000.0),
+                       getriebewelle_d=float(welle_d),
+                       flansch_d=float(abtrieb.mass),
+                       scheiben=scheiben, doc=doc)
+    versatz = FreeCAD.Vector(abtrieb.ort.x, 0.0, 0.0)
+    aus = []
+    laenge = 0.0
+    for label, shp in teile:
+        kopie = shp.copy()
+        kopie.translate(versatz)
+        laenge = max(laenge, kopie.BoundBox.XMax - abtrieb.ort.x)
+        aus.append(("Kupplung: " + label, kopie))
+    a["anschluss_x"] = round(abtrieb.ort.x, 2)
+    a["laenge"] = round(laenge, 2)
+    a["teile"] = len(aus)
+    k["kupplung"] = a
+    return aus, laenge
+
+
 def _getriebe_anflanschen(abtrieb, k, doc, gaenge=5, welle_d=0.0, modul=0.0,
-                          zaehne_summe=0, drehung=None):
+                          zaehne_summe=0, drehung=None, versatz_x=0.0):
     """Das Getriebe aus Tools/getriebe_fcgear.py hinter den Motor setzen.
 
     Beide laufen in der Normallage entlang X mit der Welle auf y = z = 0 —
@@ -377,7 +424,8 @@ def _getriebe_anflanschen(abtrieb, k, doc, gaenge=5, welle_d=0.0, modul=0.0,
     if not wellen:
         return []
     anfang = min(s.BoundBox.XMin for s in wellen)
-    versatz = FreeCAD.Vector(abtrieb.ort.x - anfang, 0.0, 0.0)
+    versatz = FreeCAD.Vector(abtrieb.ort.x + float(versatz_x) - anfang,
+                             0.0, 0.0)
     # Erst DREHEN, dann schieben: die Drehung geht um die Kurbelwellenachse
     # (x-Achse durch den Ursprung), und die ist im Getriebebild die
     # Eingangswelle. Andersherum wandert die Eingangswelle von der Achse.
@@ -391,7 +439,7 @@ def _getriebe_anflanschen(abtrieb, k, doc, gaenge=5, welle_d=0.0, modul=0.0,
         kopie.translate(versatz)
         aus.append(("Getriebe: " + label, kopie))
     g.update({"gaenge": int(gaenge), "teile": len(aus),
-              "anschluss_x": round(abtrieb.ort.x, 2),
+              "anschluss_x": round(abtrieb.ort.x + float(versatz_x), 2),
               "flansch_d": round(abtrieb.mass, 1)})
     k["getriebe"] = g
     return aus
@@ -586,6 +634,27 @@ def pruefe(teile=None, proben=None, kenn=None, toleranz=0.02, **kw):
                 "die Vorgelegewelle steht senkrecht zur Kurbelwellenachse "
                 "(y %.1f, z %.1f bei %.1f mm Achsabstand)"
                 % (vorgelege[0], vorgelege[1], g["achsabstand"]))
+
+    # Die Kupplung sitzt ZWISCHEN Motor und Getriebe — sie muss auf der
+    # Kurbelwellenachse sitzen, ihre Nabe muss die Getriebeeingangswelle
+    # aufnehmen, und das Getriebe darf nicht in ihr stehen.
+    if kenn and kenn.get("kupplung"):
+        ku = kenn["kupplung"]
+        sag(ku["scheiben"] in (1, 2),
+            "%s-Kupplung, %d Reibflaechen, Belag %.0f/%.0f mm"
+            % (ku["bauart"], ku["reibflaechen"], ku["belag_d"],
+               ku["belag_innen_d"]))
+        if kenn.get("getriebe"):
+            g = kenn["getriebe"]
+            sag(abs(ku["getriebewelle_d"] - g["welle_d"]) < 0.05,
+                "die Kupplungsnabe (%.1f) nimmt die Getriebewelle (%.1f) auf"
+                % (ku["getriebewelle_d"], g["welle_d"]))
+            sag(g["anschluss_x"] >= ku["anschluss_x"] + ku["laenge"] - 0.05,
+                "das Getriebe beginnt hinter der Kupplung (%.0f nach %.0f)"
+                % (g["anschluss_x"], ku["anschluss_x"] + ku["laenge"]))
+        sag(ku["belag_d"] <= ku["schwungrad_d"],
+            "das Schwungrad (%.0f) traegt den Belag (%.0f)"
+            % (ku["schwungrad_d"], ku["belag_d"]))
 
     # Kolben und Pleuel: je Zylinder eines.
     if kenn:

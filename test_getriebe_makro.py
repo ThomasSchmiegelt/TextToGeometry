@@ -264,6 +264,53 @@ pruefe("100Cr6" in meldung or "Steel" in meldung,
        "Werkstoff gesetzt: %s" % meldung)
 FreeCAD.closeDocument(doc.Name)
 
+# --- Kupplung und Planetengetriebe ---------------------------------------
+log("\n--- Kupplung ---")
+import kupplung as KU
+try:
+    log("     " + KU.selbsttest())
+    pruefe(True, "kupplung: Selbsttest")
+except Exception as e:  # noqa: BLE001
+    pruefe(False, "kupplung: %s" % e)
+a_ein = KU.auslegen(5995.0, scheiben=1)
+a_zwei = KU.auslegen(5995.0, scheiben=2)
+pruefe(a_zwei["belag_d"] < a_ein["belag_d"],
+       "zwei Scheiben machen den Belag kleiner (%.0f statt %.0f mm)"
+       % (a_zwei["belag_d"], a_ein["belag_d"]))
+pruefe(a_zwei["reibflaechen"] == 4, "zwei Scheiben, vier Reibflaechen")
+pruefe(KU.auslegen(5995.0)["scheiben"] == 2,
+       "ueber der Grenze wird von selbst zweischeibig gebaut")
+
+log("\n--- Planetengetriebe ---")
+import planetengetriebe as PG
+try:
+    log("     " + PG.selbsttest())
+    pruefe(True, "planetengetriebe: Selbsttest")
+except Exception as e:  # noqa: BLE001
+    pruefe(False, "planetengetriebe: %s" % e)
+pruefe(PG.achsbedingung(24, 21) == 66, "Achsbedingung 24 + 2x21 = 66")
+pruefe(PG.montagebedingung(24, 66, 3) and not PG.montagebedingung(24, 66, 4),
+       "Montagebedingung: 3 Planeten ja, 4 nein")
+pruefe(abs(PG.uebersetzung(30, 80, "hohlrad") - 3.6667) < 1e-3,
+       "Willis: Hohlrad fest gibt i = 3,667 bei 30/80")
+v = PG.vorschlag(4.0, planeten=3, z_max=60)
+pruefe(abs(v["abweichung"]) < 1e-6,
+       "Vorschlag trifft i = 4 genau (z %d/%d/%d)"
+       % (v["zaehne_sonne"], v["zaehne_planet"], v["zaehne_hohlrad"]))
+
+# --- Vorgelegegetriebe ---------------------------------------------------
+log("\n--- Vorgelegegetriebe ---")
+import getriebe_fcgear as GFC
+kons, vpaare = GFC.gangpaare_vorgelege(69, 6, 17)
+pruefe(kons[0] + kons[1] == 69, "die Konstante laeuft auf dem Achsabstand")
+pruefe(all(zf + zl == 69 for zf, zl, _i in vpaare),
+       "alle Gangpaare laufen auf demselben Achsabstand")
+pruefe(all(vpaare[k][2] > vpaare[k + 1][2] for k in range(len(vpaare) - 1)),
+       "die Uebersetzungen werden von Gang zu Gang kleiner")
+pruefe(abs(vpaare[0][2] - kons[2] * vpaare[0][1] / vpaare[0][0]) < 1e-3,
+       "die Gesamtuebersetzung ist das Produkt beider Stufen (%.3f)"
+       % vpaare[0][2])
+
 log("\nFEHLER: %d" % len(FEHLER))
 log("ALLE GRUEN" if not FEHLER else "FEHLGESCHLAGEN")
 if FEHLER:
