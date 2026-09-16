@@ -73,6 +73,34 @@ Anlasserzahnkranz                              Kupplungsdeckel, Ausrücklager
 Beides ist Geometrie, die im echten Bauteil selbstverständlich da ist und im
 Modell erst auffällt, wenn man misst.
 
+## Die Kupplung sitzt in der Getriebeglocke
+
+Die **Kupplungsglocke** gehört zum Getriebe, nicht zum Motor — deshalb
+tauscht man ein Getriebe samt Glocke. Sie sitzt vorn am Getriebegehäuse, ist
+am Motorblock verschraubt und umschließt Schwungrad und Kupplung.
+
+Daraus folgt, wie der Antriebsstrang wirklich zusammenhängt: die
+**Getriebeeingangswelle läuft durch die Glocke hindurch**, trägt die Naben
+der Kupplungsscheiben und stützt sich mit ihrer Nase im Schwungrad ab.
+Vorher stand das Getriebe einfach hinter der Kupplung — geometrisch möglich,
+aber ohne Zusammenhang.
+
+Nachgemessen am V12: Glocke 112 mm lang, Kupplung x 662…774 darin,
+Antriebswelle x 654…873 trägt beide Scheibennaben, Getriebe insgesamt 661 mm
+(79 % der Motorlänge).
+
+Drei Maße mussten dafür stimmen, und jedes hat die Prüfung gefunden:
+
+- Die **Pilotbohrung im Schwungrad geht durch** — als Sackloch ab 30 % der
+  Dicke stieß die Eingangswelle auf Vollmaterial (4,0 %). Dort sitzt das
+  Pilotlager, und dahinter die Zentrierbohrung der Kurbelwelle.
+- Die **Nabe braucht Laufspiel** auf der Welle (2,9 % bei Nullspiel). Sie
+  muss axial gleiten können, sonst ließe sich die Kupplung nicht lösen — ein
+  Nullspiel ist von einem Fehler nicht zu unterscheiden.
+- Der **Lagersitz der Eingangswelle gehört an die Gehäusewand**, nicht an die
+  Wellennase. Mit dem Sitz vorn (30 mm unter 29-mm-Nabenbohrung) lief die
+  Nabe auf dem Absatz.
+
 ## Was offen bleibt
 
 - **Belagfederung** (Segmente zwischen den Belägen für sanftes Anfahren).

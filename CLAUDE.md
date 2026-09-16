@@ -692,6 +692,18 @@ when you measure the model: the **damper springs need punched windows** in
 the lining carrier (33 % interference without them), and the **flywheel needs
 a stepped central recess** for the disc hub (20 %).
 
+**The bell housing belongs to the gearbox.** `getriebe_fcgear` builds a
+`Kupplungsglocke` in front of the housing when `glocke_l > 0`, and *extends
+the input shaft by the same length* — that is what ties the drivetrain
+together: the shaft runs through the bell, carries the clutch disc hubs and
+pilots in the flywheel. Before that the gearbox merely stood behind the
+clutch. Three dimensions had to follow, and the interference check found each
+one: the flywheel's **pilot bore goes through** (a blind bore from 30 % depth
+left the shaft in solid metal, 4.0 %); the **hub needs running clearance**
+(2.9 % at zero fit — and it must slide axially or the clutch cannot be
+released); and the input shaft's **bearing seat belongs at the housing wall**,
+not at the shaft nose, where the hub ran on the 30 mm shoulder.
+
 **The planetary gear.** Four conditions, three of them purely geometric, and
 a set that breaks any one of them cannot be built:
 
@@ -710,6 +722,15 @@ there, so it stands rotated by `φ·z_sun/z_planet` (measured: 119.9 / 120.0 /
 120.1°). And the carrier cheeks need **bores for the planet pins** — without
 them the pin sat 21 % inside solid metal, and those bores are precisely what
 makes a carrier a carrier.
+
+The ring gear is **really internally toothed** — FCGear's
+`CreateInternalInvoluteGear`, the same tooth turned inside out. It used to be
+a plain ring with a bore, which is exactly the part that makes a ring gear a
+ring gear. Measured at z = 66, m = 2: 39 290 mm³ against 41 620 for the smooth
+ring, the difference being the tooth gaps. `pruefe()` now **measures meshing
+pairs** instead of skipping them, at the usual 2 % — skipped, a
+mis-phased ring could never show up; measured, the planet/ring mesh comes out
+at 1.0 %.
 
 ### Fits, and why they matter to the checks
 

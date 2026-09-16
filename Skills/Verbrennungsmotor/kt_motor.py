@@ -233,6 +233,7 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
         k.update(vt_kenn)
 
     kupplung_l = 0.0
+    glocke_d = 0.0
     if mit_kupplung or mit_getriebe:
         g_soll = getriebe_auslegung(k["hubraum_cm3"], getriebe_welle_d,
                                     getriebe_modul, getriebe_zaehne_summe,
@@ -242,11 +243,21 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
                 kw.punkt("abtrieb"), k, doc, g_soll["welle_d"],
                 kupplung_scheiben)
             teile.extend(k_teile)
+            # Die Glocke muss das groesste Teil der Kupplung umschliessen —
+            # den Kupplungsdeckel bzw. das Schwungrad.
+            glocke_d = max(k["kupplung"]["schwungrad_d"] + 14.0,
+                           k["kupplung"]["belag_d"] + 40.0) + 20.0
     if mit_getriebe:
+        # MIT Kupplung waechst die Glocke um deren Baulaenge nach vorn, und
+        # das Getriebe selbst rueckt nicht weg: die Antriebswelle laeuft
+        # durch die Glocke bis ins Schwungrad, und die Kupplungsscheiben
+        # sitzen auf ihr. Ohne Glocke stuende das Getriebe hinter der
+        # Kupplung, statt sie zu tragen.
         teile.extend(_getriebe_anflanschen(
             kw.punkt("abtrieb"), k, doc, getriebe_gaenge,
             getriebe_welle_d, getriebe_modul, getriebe_zaehne_summe,
-            getriebe_drehung, versatz_x=kupplung_l))
+            getriebe_drehung, versatz_x=0.0,
+            glocke_l=kupplung_l, glocke_d=glocke_d))
     return teile, k, proben
 
 
@@ -391,7 +402,8 @@ def _kupplung_anflanschen(abtrieb, k, doc, welle_d, scheiben=0):
 
 
 def _getriebe_anflanschen(abtrieb, k, doc, gaenge=5, welle_d=0.0, modul=0.0,
-                          zaehne_summe=0, drehung=None, versatz_x=0.0):
+                          zaehne_summe=0, drehung=None, versatz_x=0.0,
+                          glocke_l=0.0, glocke_d=0.0):
     """Das Getriebe aus Tools/getriebe_fcgear.py hinter den Motor setzen.
 
     Beide laufen in der Normallage entlang X mit der Welle auf y = z = 0 —
@@ -412,7 +424,8 @@ def _getriebe_anflanschen(abtrieb, k, doc, gaenge=5, welle_d=0.0, modul=0.0,
                     modul=g["modul"], breite=g["breite"], luft=g["luft"],
                     zaehne_summe=g["zaehne_summe"], wand=g["wand"],
                     schraube_d=g["schraube_d"], z_min=g["z_min"],
-                    bauart=g["bauart"],
+                    bauart=g["bauart"], glocke_l=float(glocke_l),
+                    glocke_d=float(glocke_d),
                     lager_reihe=g["lager_reihe"], doc=doc)
     konstante, gangpaare = GF.gangpaare_vorgelege(
         g["zaehne_summe"], int(gaenge), g["z_min"])
@@ -440,6 +453,7 @@ def _getriebe_anflanschen(abtrieb, k, doc, gaenge=5, welle_d=0.0, modul=0.0,
         aus.append(("Getriebe: " + label, kopie))
     g.update({"gaenge": int(gaenge), "teile": len(aus),
               "anschluss_x": round(abtrieb.ort.x + float(versatz_x), 2),
+              "glocke_l": round(float(glocke_l), 2),
               "flansch_d": round(abtrieb.mass, 1)})
     k["getriebe"] = g
     return aus
@@ -649,9 +663,29 @@ def pruefe(teile=None, proben=None, kenn=None, toleranz=0.02, **kw):
             sag(abs(ku["getriebewelle_d"] - g["welle_d"]) < 0.05,
                 "die Kupplungsnabe (%.1f) nimmt die Getriebewelle (%.1f) auf"
                 % (ku["getriebewelle_d"], g["welle_d"]))
-            sag(g["anschluss_x"] >= ku["anschluss_x"] + ku["laenge"] - 0.05,
-                "das Getriebe beginnt hinter der Kupplung (%.0f nach %.0f)"
-                % (g["anschluss_x"], ku["anschluss_x"] + ku["laenge"]))
+            # Die Kupplung sitzt IN der Glocke des Getriebes, und die
+            # Antriebswelle laeuft durch ihre Naben.
+            sag(g.get("glocke_l", 0.0) >= ku["laenge"] - 0.05,
+                "die Kupplungsglocke (%.0f mm) umschliesst die Kupplung "
+                "(%.0f mm)" % (g.get("glocke_l", 0.0), ku["laenge"]))
+            glocke = [sh for n, sh in teile if n.endswith("Kupplungsglocke")]
+            naben = [sh for n, sh in teile
+                     if "Scheibennabe" in n]
+            welle = [sh for n, sh in teile if n.endswith("Antriebswelle")]
+            if glocke and naben:
+                gb = glocke[0].BoundBox
+                drin = all(gb.XMin - 1.0 <= (b.XMin + b.XMax) / 2.0
+                           <= gb.XMax + 1.0
+                           for b in (s.BoundBox for s in naben))
+                sag(drin, "die Kupplungsscheiben liegen in der Glocke "
+                          "(x %.0f…%.0f)" % (gb.XMin, gb.XMax))
+            if welle and naben:
+                wb = welle[0].BoundBox
+                durch = all(wb.XMin <= b.XMin and b.XMax <= wb.XMax
+                            for b in (s.BoundBox for s in naben))
+                sag(durch,
+                    "die Antriebswelle (x %.0f…%.0f) traegt alle "
+                    "Kupplungsnaben" % (wb.XMin, wb.XMax))
         sag(ku["belag_d"] <= ku["schwungrad_d"],
             "das Schwungrad (%.0f) traegt den Belag (%.0f)"
             % (ku["schwungrad_d"], ku["belag_d"]))

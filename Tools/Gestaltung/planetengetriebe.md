@@ -86,10 +86,25 @@ Die **Stegwangen** brauchen Bohrungen für die Planetenbolzen — ohne sie stak
 der Bolzen zu 21 % im Vollmaterial. Genau diese Bohrungen machen den Steg
 zum Planetenträger.
 
+## Das Hohlrad ist wirklich innenverzahnt
+
+FCGear hat dafür `CreateInternalInvoluteGear` — derselbe Zahn wie außen, nur
+nach innen gestülpt: aus Kopf wird Fuß, aus Spiel wird Höhe. Vorher war das
+Hohlrad ein glatter Ring mit Bohrung; damit fehlte genau das, was es zum
+Hohlrad macht.
+
+Nachgemessen an z = 66, m = 2, Breite 16: **39 290 mm³ gegen 41 620 mm³**
+beim glatten Ring — die Differenz sind die Zahnlücken. Und der Eingriff
+Planet/Hohlrad liegt bei **1,0 %**, also innerhalb der Kämmtoleranz; die
+Phase stimmt damit ohne Zutun.
+
+Dazu wurde die Prüfung geschärft: kämmende Verzahnungen werden jetzt
+**mitgemessen** statt übersprungen, nur mit derselben Schranke wie überall
+(2 % des kleineren Teils). Übersprungen könnte ein falsch verdrehtes Hohlrad
+nie auffallen.
+
 ## Was offen bleibt
 
-- Das **Hohlrad ist unverzahnt** dargestellt (glatter Ring). FCGear kann
-  Innenverzahnungen; sie einzusetzen wäre der nächste Schritt.
 - **Schrägverzahnung** und Profilverschiebung.
 - **Lagerung** der Planetenbolzen (Nadellager).
 - Mehrstufige Sätze und die Schaltelemente eines Automatikgetriebes.

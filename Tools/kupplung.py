@@ -194,7 +194,7 @@ def _membranfeder(d_aussen, d_innen, dicke, zungen, hoehe, x):
 
 
 def baue(hubraum_cm3=2000.0, belag_d=0.0, getriebewelle_d=0.0,
-         flansch_d=0.0, scheiben=0, doc=None):
+         flansch_d=0.0, scheiben=0, spiel=0.1, doc=None):
     """Die Kupplung als Liste von (Bezeichnung, Shape).
 
     Gebaut wird entlang **+X**, x = 0 ist die **Schwungradrückseite** — also
@@ -202,6 +202,12 @@ def baue(hubraum_cm3=2000.0, belag_d=0.0, getriebewelle_d=0.0,
 
     Bei zwei Scheiben liegt zwischen ihnen die **Zwischenplatte**; sie dreht
     mit dem Schwungrad und gibt der zweiten Scheibe ihre Gegenfläche.
+
+    ``spiel`` ist das Laufspiel der Nabe auf der Getriebeeingangswelle. Es
+    darf nicht null sein: die Scheibe muss auf der Welle **axial gleiten**
+    können, sonst ließe sich die Kupplung gar nicht lösen. Mit einer
+    Nabenbohrung genau im Wellenmaß meldete die Durchdringungsprüfung zu
+    Recht 3,4 % — ein Nullspiel ist von einem Fehler nicht zu unterscheiden.
     """
     a = auslegen(hubraum_cm3, belag_d, 0.0, getriebewelle_d, flansch_d,
                  scheiben)
@@ -227,9 +233,13 @@ def baue(hubraum_cm3=2000.0, belag_d=0.0, getriebewelle_d=0.0,
     schwung = schwung.cut(Part.makeCylinder(
         nabe_frei / 2.0, sr_t * 0.45,
         Vector(x + sr_t * 0.55, 0, 0), Vector(1, 0, 0)))
+    # Die Pilotbohrung geht DURCH: dort steckt das Pilotlager, und dahinter
+    # sitzt die Zentrierbohrung der Kurbelwelle. Als Sackloch ab 30 % der
+    # Dicke stiess die Getriebeeingangswelle vorn auf Vollmaterial (4 %
+    # Durchdringung) — sie muss aber bis in die Kurbelwelle reichen.
     schwung = schwung.cut(Part.makeCylinder(
-        a["getriebewelle_d"] / 2.0 + 1.0, sr_t * 0.7,
-        Vector(x + sr_t * 0.3, 0, 0), Vector(1, 0, 0)))
+        a["getriebewelle_d"] / 2.0 + 1.0, sr_t + 2.0,
+        Vector(x - 1.0, 0, 0), Vector(1, 0, 0)))
     teile.append(("Schwungrad", schwung))
     teile.append(("Anlasserzahnkranz",
                   _ring(a["schwungrad_d"] + 14.0, a["schwungrad_d"],
@@ -253,7 +263,8 @@ def baue(hubraum_cm3=2000.0, belag_d=0.0, getriebewelle_d=0.0,
         # AXIAL VERSCHIEBBAR sein, sonst liesse sich die Kupplung nicht
         # loesen.
         teile.append(("Scheibennabe%s" % zusatz,
-                      _ring(nabe_d, a["getriebewelle_d"],
+                      _ring(nabe_d,
+                            a["getriebewelle_d"] + 2.0 * float(spiel),
                             scheibe_b + 8.0, x - 4.0)))
         # Torsionsdaempfer: Federn zwischen Nabe und Belagtraeger. Sie
         # nehmen die Drehschwingungen des Motors auf — beim V12 die
@@ -306,8 +317,8 @@ def baue(hubraum_cm3=2000.0, belag_d=0.0, getriebewelle_d=0.0,
     # --- Ausruecklager ---------------------------------------------------
     al_d = a["getriebewelle_d"] + 34.0
     teile.append(("Ausruecklager",
-                  _ring(al_d, a["getriebewelle_d"] + 4.0, 16.0,
-                        deckel_x + 8.0)))
+                  _ring(al_d, a["getriebewelle_d"] + 4.0 + 2.0 * float(spiel),
+                        16.0, deckel_x + 8.0)))
 
     return teile, a
 

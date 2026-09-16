@@ -143,7 +143,8 @@ def auslegen(zaehne_sonne=24, zaehne_planet=21, planeten=3, modul=2.0,
         "montage_ok": montagebedingung(zs, zh, p),
         "nachbar_ok": nachbarbedingung(zs, zp, p),
     }
-    a["hohlrad_aussen_d"] = round(m * (zh + 6), 2)
+    a["hohlrad_wand"] = round(max(4.0, 3.0 * m), 1)
+    a["hohlrad_aussen_d"] = round(m * zh + 2.0 * a["hohlrad_wand"], 2)
     return a
 
 
@@ -185,6 +186,32 @@ def _rad(doc, zaehne, modul, breite, bohrung):
     k = shp.copy()
     k.rotate(Vector(0, 0, 0), Vector(0, 1, 0), 90)
     return k, d_a
+
+
+def _hohlrad(doc, zaehne, modul, breite, wand):
+    """Ein **innenverzahntes** Rad über FCGear, Achse X.
+
+    FCGear hat dafür ``CreateInternalInvoluteGear``: derselbe Zahn wie außen,
+    nur nach innen gestülpt — aus Kopf wird Fuß, aus Spiel wird Höhe. Der
+    Ring war vorher ein glatter Zylinder mit Bohrung; die Zähne fehlten, und
+    damit fehlte genau das, was das Hohlrad zum Hohlrad macht.
+
+    ``wand`` ist die Wandstärke über dem Zahngrund; der Außendurchmesser
+    wird ``m·z + 2·wand``.
+    """
+    import freecad.gears.commands as gc
+
+    g = gc.CreateInternalInvoluteGear.create()
+    g.num_teeth = int(zaehne)
+    g.module = float(modul)
+    g.height = float(breite)
+    g.thickness = float(wand)
+    doc.recompute()
+    shp = g.Shape.copy()
+    doc.removeObject(g.Name)
+    doc.recompute()
+    shp.rotate(Vector(0, 0, 0), Vector(0, 1, 0), 90)
+    return shp
 
 
 def baue(zaehne_sonne=24, zaehne_planet=21, planeten=3, modul=2.0,
@@ -242,15 +269,9 @@ def baue(zaehne_sonne=24, zaehne_planet=21, planeten=3, modul=2.0,
                                      a["achsabstand"] * math.sin(w)),
                               Vector(1, 0, 0))))
 
-    # --- Hohlrad ----------------------------------------------------------
-    # Innenverzahnt; hier als Ring vom Fusskreis der Innenverzahnung nach
-    # aussen. Der Fusskreis der INNENverzahnung liegt AUSSEN vom Teilkreis.
-    r_innen = modul * a["zaehne_hohlrad"] / 2.0 + modul
-    hohl = Part.makeCylinder(a["hohlrad_aussen_d"] / 2.0, b,
-                             Vector(x0, 0, 0), Vector(1, 0, 0))
-    hohl = hohl.cut(Part.makeCylinder(r_innen, b + 2.0,
-                                      Vector(x0 - 1.0, 0, 0),
-                                      Vector(1, 0, 0)))
+    # --- Hohlrad, wirklich innenverzahnt ---------------------------------
+    hohl = _hohlrad(doc, a["zaehne_hohlrad"], modul, b, a["hohlrad_wand"])
+    hohl.translate(Vector(x0, 0, 0))
     teile.append(("Hohlrad (z=%d, innenverzahnt)" % a["zaehne_hohlrad"],
                   hohl))
 
@@ -337,17 +358,16 @@ def pruefe(teile, a):
             "die Planeten stehen %s Grad auseinander (Soll %.0f)"
             % (sorted(set(ab)), soll))
 
-    # Nichts darf sich durchdringen — ausser den kaemmenden Verzahnungen.
-    kaemmt = ("Sonnenrad", "Planetenrad", "Hohlrad")
+    # Nichts darf sich durchdringen. Kaemmende Verzahnungen beruehren sich
+    # ein wenig — aber sie werden MITGEMESSEN, nur mit derselben Schranke
+    # wie ueberall (2 % des kleineren Teils). Uebersprungen koennte ein
+    # falsch verdrehtes Hohlrad nie auffallen.
     schlimm, wo = 0.0, ""
     for i in range(len(teile)):
         for j in range(i + 1, len(teile)):
             n1, s1 = teile[i]
             n2, s2 = teile[j]
             if not s1.BoundBox.intersect(s2.BoundBox):
-                continue
-            if any(n1.startswith(e) for e in kaemmt) and \
-                    any(n2.startswith(e) for e in kaemmt):
                 continue
             v = s1.common(s2).Volume
             klein = min(s1.Volume, s2.Volume)
@@ -357,6 +377,19 @@ def pruefe(teile, a):
     sag(schlimm < 0.02,
         "groesste Durchdringung %.1f %%%s"
         % (schlimm * 100, (" bei " + wo) if wo else ""))
+
+    # Das Hohlrad muss wirklich VERZAHNT sein. Ein glatter Ring hat auf
+    # seinem Innendurchmesser ueberall dasselbe Material; eine Verzahnung
+    # hat Zaehne und Luecken. Gemessen wird das Volumen gegen den glatten
+    # Ring gleicher Abmessung: die Zahnluecken fehlen.
+    hohl = [s for n, s in teile if n.startswith("Hohlrad")]
+    if hohl:
+        ra = a["hohlrad_aussen_d"] / 2.0
+        ri = a["teilkreis_hohlrad"] / 2.0
+        glatt = math.pi * (ra ** 2 - ri ** 2) * a["breite"]
+        sag(hohl[0].Volume < glatt * 1.02,
+            "das Hohlrad ist innenverzahnt (%.0f statt %.0f mm^3 glatt)"
+            % (hohl[0].Volume, glatt))
     return befunde
 
 

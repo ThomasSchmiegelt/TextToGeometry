@@ -192,7 +192,7 @@ def gangpaare_vorgelege(zaehne_summe, gaenge, z_min=17,
 
 
 def baue(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
-         z_min=12, bauart="zweiwellen",
+         z_min=12, bauart="zweiwellen", glocke_l=0.0, glocke_d=0.0,
          verzahnung="gerade", schraegwinkel=15.0, eingriffswinkel=20.0,
          flankenspiel=0.05, welle_d=20.0, lager_reihe="62", spiel=0.1,
          gehaeuse_luft=3.0, wand=4.0, flansch_b=12.0, schraube_d=6.0,
@@ -233,6 +233,13 @@ def baue(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
                    der Antrieb herkommt. Dazu gehört der **direkte Gang**:
                    die Schaltmuffe kuppelt Antriebswelle und Hauptwelle
                    unmittelbar, die Vorgelegewelle läuft leer mit, i = 1.
+    glocke_l       Länge der **Kupplungsglocke** vor dem Gehäuse [mm]; 0 =
+                   keine. Nur bei ``bauart="vorgelege"``. Die Glocke gehört
+                   zum Getriebe und umschließt die Kupplung; die
+                   Antriebswelle wird um dieselbe Länge verlängert und
+                   trägt die Kupplungsscheiben.
+    glocke_d       Außendurchmesser der Glocke [mm]; 0 = aus dem
+                   Achsabstand schätzen
     """
     gaenge = max(1, int(gaenge))
     doc = doc or FreeCAD.ActiveDocument or FreeCAD.newDocument("Getriebe")
@@ -244,7 +251,8 @@ def baue(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
             flankenspiel=flankenspiel, welle_d=welle_d,
             lager_reihe=lager_reihe, spiel=spiel,
             gehaeuse_luft=gehaeuse_luft, wand=wand, flansch_b=flansch_b,
-            schraube_d=schraube_d, muffe_b=muffe_b, doc=doc)
+            schraube_d=schraube_d, muffe_b=muffe_b,
+            glocke_l=glocke_l, glocke_d=glocke_d, doc=doc)
 
     paare = G.gangpaare(int(zaehne_summe), gaenge, int(z_min))
     a = G.achsabstand(modul, *paare[0][:2])
@@ -365,7 +373,8 @@ def _baue_vorgelege(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0,
                     schraegwinkel=15.0, eingriffswinkel=20.0,
                     flankenspiel=0.05, welle_d=20.0, lager_reihe="62",
                     spiel=0.1, gehaeuse_luft=3.0, wand=4.0, flansch_b=12.0,
-                    schraube_d=6.0, muffe_b=0.0, doc=None):
+                    schraube_d=6.0, muffe_b=0.0, glocke_l=0.0, glocke_d=0.0,
+                    doc=None):
     """Das Vorgelegegetriebe — Antriebswelle und Hauptwelle auf einer Achse.
 
     Aufbau entlang +X, vom Motor her gesehen:
@@ -384,6 +393,15 @@ def _baue_vorgelege(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0,
     Vorgelegewelle. Die erste Muffe kuppelt nach vorn die Antriebswelle
     selbst — das ist der **direkte Gang**, i = 1, und dabei läuft die
     Vorgelegewelle leer mit.
+
+    ``glocke_l`` > 0 baut die **Kupplungsglocke** an: eine Haube, die vorn
+    am Getriebegehäuse sitzt, die Kupplung umschließt und am Motorblock
+    verschraubt ist. Sie gehört zum Getriebe, nicht zum Motor — das ist der
+    Grund, warum man ein Getriebe samt Glocke tauscht. Die **Antriebswelle
+    wird dann um dieselbe Länge verlängert**: sie muss durch die Glocke
+    hindurch bis in die Kupplungsscheiben reichen, deren Naben auf ihr
+    laufen, und sich vorn im Schwungrad abstützen. Ohne diese Verlängerung
+    stünde das Getriebe hinter der Kupplung, statt sie zu tragen.
     """
     doc = doc or FreeCAD.ActiveDocument or FreeCAD.newDocument("Getriebe")
     konstante, paare = gangpaare_vorgelege(int(zaehne_summe), int(gaenge),
@@ -463,8 +481,18 @@ def _baue_vorgelege(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0,
     antrieb_l = trennung - x_welle
     # Nur vorn ein Lagersitz: hinten kommt die Kupplungsverzahnung, ueber
     # die die Muffe im direkten Gang greift.
-    lege_ab(_welle(antrieb_l, welle_d, lm["d"], sitz_l, sitze="vorn"),
-            "Antriebswelle", (x_welle, 0.0, 0.0))
+    gl = max(0.0, float(glocke_l))
+    welle_a = _welle(antrieb_l, welle_d, lm["d"], sitz_l, sitze="vorn")
+    if gl > 0.0:
+        # Die Verlaengerung durch die Glocke ist ein GLATTER Schaft, kein
+        # weiterer Lagersitz: darauf gleiten die Kupplungsnaben, und ihre
+        # Nase stuetzt sich im Schwungrad ab. Mit dem Lagersitz an der Nase
+        # (30 mm unter 29-mm-Nabenbohrung) durchdrangen sich Nabe und Welle
+        # um 2,9 %. Das Lager der Antriebswelle sitzt an der Gehaeusewand,
+        # nicht am Wellenende.
+        welle_a = welle_a.fuse(Part.makeCylinder(
+            welle_d / 2.0, gl, Vector(0, 0, -gl))).removeSplitter()
+    lege_ab(welle_a, "Antriebswelle", (x_welle, 0.0, 0.0))
     # Zapfen: die Antriebswelle stuetzt sich in der Hauptwelle ab. Er
     # braucht dort eine BOHRUNG — als blosser Zylinder auf der Stirnflaeche
     # stak er zu 100 % im Vollmaterial. Das ist das Pilotlager des echten
@@ -511,6 +539,31 @@ def _baue_vorgelege(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0,
                               schraube_d=schraube_d,
                               welle_d=welle_d + 2.0 * spiel, achse="x"):
         teile.append((label, shp))
+
+    # --- Kupplungsglocke -------------------------------------------------
+    if gl > 0.0:
+        d_a = float(glocke_d) or (a * 2.0 + 80.0)
+        x_g = -wand - gl
+        glocke = Part.makeCylinder(d_a / 2.0, gl, Vector(x_g, 0, 0),
+                                   Vector(1, 0, 0))
+        glocke = glocke.cut(Part.makeCylinder(
+            d_a / 2.0 - float(wand), gl + 2.0,
+            Vector(x_g - 1.0, 0, 0), Vector(1, 0, 0)))
+        # Anschraubflansch zum Motorblock, vorn.
+        flansch = Part.makeCylinder(d_a / 2.0 + float(flansch_b), wand * 1.5,
+                                    Vector(x_g, 0, 0), Vector(1, 0, 0))
+        flansch = flansch.cut(Part.makeCylinder(
+            d_a / 2.0 - float(wand), wand * 2.0,
+            Vector(x_g - 1.0, 0, 0), Vector(1, 0, 0)))
+        for k in range(10):
+            w = 2.0 * math.pi * k / 10.0
+            r = d_a / 2.0 + float(flansch_b) / 2.0
+            flansch = flansch.cut(Part.makeCylinder(
+                float(schraube_d) / 2.0, wand * 3.0,
+                Vector(x_g - 1.0, r * math.cos(w), r * math.sin(w)),
+                Vector(1, 0, 0)))
+        teile.append(("Kupplungsglocke",
+                      glocke.fuse(flansch).removeSplitter()))
 
     return teile
 
