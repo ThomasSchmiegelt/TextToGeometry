@@ -742,6 +742,57 @@ pairs** instead of skipping them, at the usual 2 % — skipped, a
 mis-phased ring could never show up; measured, the planet/ring mesh comes out
 at 1.0 %.
 
+### The gearbox, completed
+
+A countershaft gearbox is more than shafts and gears, and what was missing was
+exactly what makes it *shiftable*:
+
+- a **needle bearing under every loose gear** — the loose gear runs free on
+  the main shaft whenever its gear is not engaged, so something has to carry
+  it; the bore grew by `2 · 0.12 · shaft` to make room;
+- **two synchroniser rings per sleeve**, which needed the sleeve to stop
+  filling the whole gap: it now leaves `0.12 · gap` on each side (before,
+  the rings sat inside the neighbouring gears — 37 %);
+- a **shift fork per sleeve**, a **boss sliding on its own rail**, and three
+  **rails on an arc** above the main shaft.
+
+Three geometry lessons came out of it, each found by measuring:
+
+- The fork has **no build axis of its own** — it belongs where the sleeve is.
+  Built along Z like the gears and rotated with them, its arm pointed
+  sideways and the rail was somewhere else. It is now built along X directly.
+- The fork arms must run **radially** to their own rail. An arm that goes up
+  and then across crosses the neighbouring rails (11–13 %). Three rails on an
+  arc, three radial arms, no crossings.
+- Above the biggest gear there is **no room in the gear chamber** — the gear
+  reaches to `r_max` and the rails lie beyond it. That is what a **shift dome**
+  is for, and it is fused onto the upper housing half. Its box corners still
+  reached into the arc the forks swing on, so a cylindrical relief cut about
+  the main-shaft axis clears them.
+
+And a scheduling trap worth remembering: the dome is fused onto
+`Gehaeuse Oberteil`, but the housing is created *later* in the function, so
+the `for … if label == …: break` found nothing and the dome vanished without
+a word. Anything that modifies a part must run after that part exists — the
+measurement did not change by one percent, which is what gave it away.
+
+**The flanges belong to the housing, not beside it.** The end flange is fused
+into each half, so the gearbox is exactly three housing parts: bell housing,
+upper half, lower half. A flange that is its own part could not be bolted to
+anything.
+
+### A film of the assembly
+
+`Beispiele/film_motor.py` builds the drivetrain and photographs it part group
+by part group, then ffmpeg turns the frames into an MP4. It must run in the
+**GUI** — `saveImage` needs an OpenGL context, so FreeCADCmd cannot do it.
+
+Two things that decide whether it is watchable: `fitAll()` after **every**
+step (otherwise the drivetrain grows out of frame — the first cut had the
+gearbox half outside), and the **housings last**. The order is the order of
+assembly, and the point of the film is to see what is inside before it is
+covered up.
+
 ### Fits, and why they matter to the checks
 
 Nothing in an assembly may be zero-clearance, because a zero fit is

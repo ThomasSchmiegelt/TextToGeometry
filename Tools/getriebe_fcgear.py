@@ -368,6 +368,86 @@ def baue(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0, luft=6.0,
     return teile
 
 
+def _nadellager(d_innen, d_aussen, breite, nadeln=0):
+    """Nadellager als Käfig mit Nadeln — Ring plus Rollen, Achse Z.
+
+    Das Losrad eines Schaltgetriebes läuft **frei** auf der Hauptwelle,
+    solange sein Gang nicht eingelegt ist. Dazwischen gehört ein Lager, und
+    weil radial kaum Platz ist, ist es ein Nadellager: lange dünne Rollen
+    unmittelbar zwischen Welle und Radbohrung.
+    """
+    ri, ra = float(d_innen) / 2.0, float(d_aussen) / 2.0
+    r_nadel = max(0.8, (ra - ri) / 2.0 - 0.15)
+    r_mitte = (ra + ri) / 2.0
+    n = int(nadeln) or max(8, int(math.pi / math.asin(
+        min(0.99, r_nadel / r_mitte)) * 0.75))
+    kaefig = Part.makeCylinder(r_mitte + r_nadel * 0.25, float(breite))
+    kaefig = kaefig.cut(Part.makeCylinder(r_mitte - r_nadel * 0.25,
+                                          float(breite) + 2.0,
+                                          Vector(0, 0, -1.0)))
+    for k in range(n):
+        w = 2.0 * math.pi * k / n
+        kaefig = kaefig.fuse(Part.makeCylinder(
+            r_nadel, float(breite) * 0.9,
+            Vector(r_mitte * math.cos(w), r_mitte * math.sin(w),
+                   float(breite) * 0.05)))
+    return kaefig.removeSplitter()
+
+
+def _synchronring(d_innen, d_aussen, breite):
+    """Synchronring: ein Reibkegel zwischen Muffe und Kupplungskörper.
+
+    Er gleicht die Drehzahlen an, bevor die Muffe greift — ohne ihn würde
+    beim Schalten Zahn auf Zahn stoßen. Gebaut als flacher Kegelring, Achse Z.
+    """
+    ri, ra = float(d_innen) / 2.0, float(d_aussen) / 2.0
+    kegel = Part.makeCone(ri, ra, float(breite))
+    innen = Part.makeCone(ri - 1.2, ra - 1.2, float(breite) + 2.0,
+                          Vector(0, 0, -1.0))
+    return kegel.cut(innen)
+
+
+def _schaltgabel(x, r_nut, breite, r_stange, winkel, staerke=6.0):
+    """Schaltgabel: ein Halbring in der Muffennut mit Arm zur Schaltstange.
+
+    Gebaut **direkt entlang X**, denn sie hat keine eigene Bauachse — sie
+    sitzt dort, wo die Muffe sitzt, und greift nach oben. Im ersten Anlauf
+    entstand sie wie die Räder entlang Z und wurde mitgedreht; dabei zeigte
+    ihr Arm zur Seite statt nach oben, und die Schaltstange lag woanders.
+
+    Sie **umfasst** die Muffe, sie umschließt sie nicht: ein Halbring in
+    der umlaufenden Nut, der die Muffe axial schiebt.
+    """
+    ra = float(r_nut) + float(staerke)
+    halb = Part.makeCylinder(ra, float(breite), Vector(float(x), 0, 0),
+                             Vector(1, 0, 0))
+    halb = halb.cut(Part.makeCylinder(float(r_nut), float(breite) + 2.0,
+                                      Vector(float(x) - 1.0, 0, 0),
+                                      Vector(1, 0, 0)))
+    gross = ra * 2.0 + 4.0
+    halb = halb.cut(Part.makeBox(
+        float(breite) + 4.0, gross, gross,
+        Vector(float(x) - 2.0, -gross / 2.0, -gross)))
+    # Der Arm geht RADIAL nach aussen zu seiner eigenen Stange. Vorher lief
+    # er erst nach oben und dann quer — dabei kreuzte er die Nachbarstangen
+    # (gemessen 11 bis 13 % Durchdringung). Drei Stangen auf einem Bogen,
+    # drei radiale Arme: keiner kreuzt einen anderen.
+    arm = Part.makeBox(float(breite), float(staerke),
+                       float(r_stange) - float(r_nut) + 14.0,
+                       Vector(float(x), -float(staerke) / 2.0,
+                              float(r_nut)))
+    # Die Nabe der Gabel sitzt auf ihrer Stange und gleitet darauf.
+    nabe = Part.makeCylinder(float(staerke) * 1.8, float(breite),
+                             Vector(float(x), 0.0, float(r_stange)),
+                             Vector(1, 0, 0))
+    gabel = halb.fuse(arm).fuse(nabe)
+    gabel = gabel.cut(Part.makeCylinder(
+        7.0 + 0.15, float(breite) + 4.0,
+        Vector(float(x) - 2.0, 0.0, float(r_stange)), Vector(1, 0, 0)))
+    gabel.rotate(Vector(0, 0, 0), Vector(1, 0, 0), float(winkel))
+    return gabel.removeSplitter()
+
+
 def _baue_vorgelege(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0,
                     luft=6.0, z_min=17, verzahnung="gerade",
                     schraegwinkel=15.0, eingriffswinkel=20.0,
@@ -425,9 +505,10 @@ def _baue_vorgelege(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0,
         s.translate(Vector(*pos))
         teile.append((label, s))
 
-    def paar(z_oben, z_unten, x, label_oben, label_unten):
+    def paar(z_oben, z_unten, x, label_oben, label_unten, bohrung_oben=0.0):
         """Ein Radpaar: oben auf y = 0, unten auf der Vorgelegewelle."""
-        oben, _d1, d_a1 = zahnrad(doc, z_oben, modul, breite, welle_d,
+        oben, _d1, d_a1 = zahnrad(doc, z_oben, modul, breite,
+                                  float(bohrung_oben) or welle_d,
                                   verzahnung, schraegwinkel,
                                   eingriffswinkel, flankenspiel)
         # Gegenlaeufig schraegverzahnt, sonst kaemmen sie nicht.
@@ -457,12 +538,23 @@ def _baue_vorgelege(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0,
     abschnitte.append((schritt, raum_k))
 
     # --- Gangpaare -------------------------------------------------------
+    # Das LOSRAD laeuft frei auf der Hauptwelle — es braucht also ein Lager.
+    # In jedem wirklichen Schaltgetriebe ist das ein NADELLAGER zwischen
+    # Rad und Welle; ohne es saesse das Rad direkt auf der Welle und koennte
+    # sich nicht drehen, wenn ein anderer Gang eingelegt ist.
+    nadel_t = max(3.0, welle_d * 0.12)          # Bauhoehe des Nadellagers
+    losrad_bohrung = welle_d + 2.0 * nadel_t
     raum = raum_k
+    gang_x = []
     for k, (z_fest, z_los, i) in enumerate(paare):
         x = x_k + (k + 1) * schritt
+        gang_x.append(x)
         raum = paar(z_los, z_fest, x,
                     "Gang %d Losrad (z=%d, i=%.3f)" % (k + 1, z_los, i),
-                    "Gang %d Festrad (z=%d)" % (k + 1, z_fest))
+                    "Gang %d Festrad (z=%d)" % (k + 1, z_fest),
+                    bohrung_oben=losrad_bohrung)
+        lege_ab(_nadellager(welle_d + 2.0 * spiel, losrad_bohrung, breite),
+                "Nadellager Gang %d" % (k + 1), (x, 0.0, 0.0))
         abschnitte.append((schritt, raum))
     abschnitte.append((wand, [welle_r, welle_r], [r + wand for r in raum]))
     abschnitte.append((lm["B"], [sitz_r, sitz_r]))
@@ -518,16 +610,61 @@ def _baue_vorgelege(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0,
 
     # --- Schaltmuffen auf der HAUPTWELLE ---------------------------------
     # Die erste kuppelt nach vorn die Antriebswelle selbst: direkter Gang.
-    platz = float(luft) - 2.0 * float(spiel)
+    # In die Luecke muessen MUFFE UND ZWEI SYNCHRONRINGE. Frueher fuellte
+    # die Muffe die Luecke allein, und die Ringe standen in den Raedern
+    # (gemessen 37 % Durchdringung).
+    sr_b = max(3.0, float(luft) * 0.12)
+    platz = float(luft) - 2.0 * sr_b - 4.0 * float(spiel)
     breite_muffe = float(muffe_b) if float(muffe_b) > 0.0 else platz
     breite_muffe = max(2.0, min(breite_muffe, platz))
     namen = ["direkt/1"] + ["%d/%d" % (k + 1, k + 2)
                             for k in range(len(paare) - 1)]
+    muffe_d = welle_d + 12.0
+    r_nut = muffe_d / 2.0 + 1.0
+    # Die Schaltstangen liegen ueber dem groessten Rad, im Schaltdom.
+    r_max = max(r for _l, rs in [(0, raum_k)] + [(0, raum)] for r in rs)
+    r_stange = r_max + 22.0
+    muffen_x = []
+    # Drei Schaltstangen auf einem Bogen ueber der Hauptwelle.
+    stangen_w = (-24.0, 0.0, 24.0)
     for k, name in enumerate(namen):
-        x = x_k + k * schritt + breite + (luft - breite_muffe) / 2.0
-        lege_ab(_schaltmuffe(welle_d + 2.0 * spiel, welle_d + 12.0,
-                             breite_muffe),
+        x_luecke = x_k + k * schritt + breite
+        x = x_luecke + sr_b + 2.0 * float(spiel)
+        muffen_x.append((x, name))
+        lege_ab(_schaltmuffe(welle_d + 2.0 * spiel, muffe_d, breite_muffe),
                 "Schaltmuffe %s" % name, (x, 0.0, 0.0))
+        # Beidseits der Muffe ein SYNCHRONRING: er gleicht die Drehzahlen
+        # an, bevor die Muffe greift. Ohne ihn stiesse beim Schalten Zahn
+        # auf Zahn.
+        for seite, x_sr in (("links", x_luecke + float(spiel)),
+                            ("rechts", x + breite_muffe + float(spiel))):
+            lege_ab(_synchronring(welle_d + 2.0 * spiel + 1.0,
+                                  muffe_d - 1.0, sr_b),
+                    "Synchronring %s %s" % (name, seite), (x_sr, 0.0, 0.0))
+        # Die SCHALTGABEL greift in die Nut der Muffe und reicht nach oben
+        # zur Schaltstange; drei Stangen reihum.
+        teile.append(("Schaltgabel %s" % name,
+                      _schaltgabel(x + breite_muffe / 3.0, r_nut,
+                                   breite_muffe / 3.0 - 0.4, r_stange,
+                                   stangen_w[k % len(stangen_w)])))
+
+    # --- Schaltstangen ---------------------------------------------------
+    # Je Gabel eine Stange waere zuviel; ein Sechsganggetriebe fuehrt sie
+    # auf drei Stangen nebeneinander. Sie liegen ueber dem groessten Rad —
+    # dort ist im Zahnradraum kein Platz, deshalb sitzt darueber der
+    # SCHALTDOM (siehe unten).
+    # Die Stangen bleiben IM Dom: ueberstehend stiessen sie in die
+    # Stirnwaende des Gehaeuses (gemessen 7,9 %).
+    stange_l = innen_l - 2.0 * wand
+    for nr, w_st in enumerate(stangen_w, 1):
+        rad = math.radians(w_st)
+        teile.append(("Schaltstange %d" % nr,
+                      Part.makeCylinder(
+                          7.0, stange_l,
+                          Vector(wand, -r_stange * math.sin(rad),
+                                 r_stange * math.cos(rad)),
+                          Vector(1, 0, 0))))
+
 
     # --- Lager -----------------------------------------------------------
     for seite, x in (("links", 0.0), ("rechts", innen_l - lm["B"])):
@@ -542,6 +679,41 @@ def _baue_vorgelege(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0,
                               schraube_d=schraube_d,
                               welle_d=welle_d + 2.0 * spiel, achse="x"):
         teile.append((label, shp))
+
+    # --- Schaltdom (nach dem Gehaeuse, denn er gehoert ans Oberteil —
+    # davor gab es das Oberteil noch gar nicht, und der Dom fiel still
+    # unter den Tisch) --- -------------------------------------------------------
+    # Ueber dem groessten Rad ist im Zahnradraum kein Platz: das Rad reicht
+    # bis r_max, die Stangen liegen darueber. Der SCHALTDOM schafft ihn —
+    # ein aufgesetzter Kasten am Oberteil, in dem Stangen und Gabelnaben
+    # laufen. Ohne ihn stiessen die Gabeln ins Gehaeuse (gemessen 4,8 %).
+    dom_y = r_stange * math.sin(math.radians(max(stangen_w))) + 22.0
+    dom_z0 = r_max * 0.80
+    dom_z1 = r_stange + 20.0
+    aussen = Part.makeBox(innen_l, 2.0 * dom_y, dom_z1 - dom_z0,
+                          Vector(0.0, -dom_y, dom_z0))
+    hohl = Part.makeBox(innen_l + 2.0, 2.0 * (dom_y - wand),
+                        dom_z1 - dom_z0 - wand,
+                        Vector(-1.0, -(dom_y - wand), dom_z0 - 1.0))
+    dom = aussen.cut(hohl)
+    # Der Domkasten ist eckig, die Gabeln schwenken auf einem BOGEN. Seine
+    # Ecken ragten genau dort hinein, wo die Arme laufen (4,5 bis 6,3 %).
+    # Ein zylindrischer Freischnitt um die Hauptwellenachse raeumt sie weg.
+    frei = Part.makeCylinder(r_stange + 20.0, innen_l + 2.0,
+                             Vector(-1.0, 0, 0), Vector(1, 0, 0))
+    frei = frei.common(Part.makeBox(
+        innen_l + 4.0, 2.0 * (dom_y - wand), dom_z1 + 40.0,
+        Vector(-2.0, -(dom_y - wand), dom_z0 - 1.0)))
+    for i, (label, shp) in enumerate(teile):
+        if label == "Gehaeuse Oberteil":
+            neu_shp = shp.fuse(dom).cut(hohl)
+            geschnitten = neu_shp.cut(frei)
+            # Volumenprobe: ein Freischnitt, der das halbe Gehaeuse frisst,
+            # ist keiner.
+            if geschnitten.Volume > neu_shp.Volume * 0.5:
+                neu_shp = geschnitten
+            teile[i] = (label, neu_shp.removeSplitter())
+            break
 
     # --- Kupplungsglocke und die beiden Stirnflansche --------------------
     # Eine Glocke, die man nicht anschrauben kann, ist keine. Sie braucht
@@ -600,14 +772,24 @@ def _baue_vorgelege(gaenge=5, modul=2.0, zaehne_summe=48, breite=12.0,
                 Vector(x_stoss - 1.0, y, 0.0), Vector(1, 0, 0)))
         stirn = loecher(stirn, x_stoss - 1.0, t_fl + 2.0)
         # Teilen in der Ebene durch beide Wellenachsen, also bei z = 0 —
-        # derselben Ebene, in der auch das Gehaeuse geteilt ist.
+        # derselben Ebene, in der auch das Gehaeuse geteilt ist. Jede
+        # Haelfte gehoert AN ihre Gehaeusehaelfte: ein Flansch ist kein
+        # eigenes Bauteil, sondern ein Teil des Gehaeuses. Das Getriebe
+        # besteht damit aus genau drei Gehaeuseteilen — Kupplungsglocke,
+        # Oberteil und Unterteil.
         gross = d_fl + 20.0
-        for name, z0 in (("oben", 0.0), ("unten", -gross)):
+        for name, z0 in (("Oberteil", 0.0), ("Unterteil", -gross)):
             halb = stirn.common(Part.makeBox(
                 t_fl + 4.0, gross * 2.0, gross,
                 Vector(x_stoss - 2.0, -gross, z0)))
-            if halb.Volume > 1.0:
-                teile.append(("Gehaeuse Stirnflansch %s" % name, halb))
+            if halb.Volume <= 1.0:
+                continue
+            for i, (label, shp) in enumerate(teile):
+                if label == "Gehaeuse " + name:
+                    teile[i] = (label, shp.fuse(halb).removeSplitter())
+                    break
+            else:
+                teile.append(("Gehaeuse %s Stirnflansch" % name, halb))
 
     return teile
 

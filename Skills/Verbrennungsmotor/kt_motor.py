@@ -683,20 +683,44 @@ def pruefe(teile=None, proben=None, kenn=None, toleranz=0.02, **kw):
                 "die Kupplungsglocke (%.0f mm) umschliesst die Kupplung "
                 "(%.0f mm)" % (g.get("glocke_l", 0.0), ku["laenge"]))
             glocke = [sh for n, sh in teile if n.endswith("Kupplungsglocke")]
-            stirn = [sh for n, sh in teile
-                     if "Stirnflansch" in n]
-            sag(len(stirn) == 2,
-                "das Getriebegehaeuse hat beide Stirnflanschhaelften (%d)"
-                % len(stirn))
-            if glocke and stirn:
+            # Das Getriebe besteht aus genau DREI Gehaeuseteilen:
+            # Kupplungsglocke, Oberteil, Unterteil. Der Stirnflansch ist
+            # kein eigenes Bauteil, sondern gehoert je zur Haelfte an
+            # Ober- und Unterteil — sonst liesse er sich nicht anschrauben.
+            kasten = [n for n, _sh in teile
+                      if n.startswith("Getriebe")
+                      and ("Gehaeuse Ober" in n or "Gehaeuse Unter" in n
+                           or n.endswith("Kupplungsglocke"))]
+            sag(len(kasten) == 3,
+                "das Getriebe hat drei Gehaeuseteile: %s"
+                % ", ".join(sorted(n.split(": ")[-1] for n in kasten)))
+            haelften = [sh for n, sh in teile
+                        if n.startswith("Getriebe")
+                        and ("Gehaeuse Ober" in n or "Gehaeuse Unter" in n)]
+            if glocke and len(haelften) == 2:
                 gb = glocke[0].BoundBox
-                for sh in stirn:
-                    sb = sh.BoundBox
-                    sag(abs(sb.XMin - (gb.XMax - 0.0)) < 25.0 or
-                        sb.XMin >= gb.XMin,
-                        "Stirnflansch und Glocke stossen aneinander "
-                        "(x %.0f gegen %.0f)" % (sb.XMin, gb.XMax))
-                    break
+                vorn = max(sh.BoundBox.XMin for sh in haelften)
+                sag(abs(vorn - gb.XMax) < 0.5,
+                    "beide Gehaeusehaelften reichen mit ihrem Flansch an "
+                    "die Glocke (x %.1f gegen %.1f)" % (vorn, gb.XMax))
+
+            # Die Schaltung: je Muffe eine Gabel, je Gabel eine Stange,
+            # beidseits ein Synchronring, und unter jedem Losrad ein
+            # Nadellager.
+            def zaehle(wort):
+                return sum(1 for n, _sh in teile
+                           if n.startswith("Getriebe") and wort in n)
+            muffen = zaehle("Schaltmuffe")
+            sag(zaehle("Schaltgabel") == muffen,
+                "%d Schaltgabeln zu %d Schaltmuffen"
+                % (zaehle("Schaltgabel"), muffen))
+            sag(zaehle("Synchronring") == 2 * muffen,
+                "%d Synchronringe, zwei je Muffe" % zaehle("Synchronring"))
+            sag(zaehle("Schaltstange") >= 1,
+                "%d Schaltstangen" % zaehle("Schaltstange"))
+            sag(zaehle("Nadellager") == g["gaenge"],
+                "%d Nadellager, eines je Losrad"
+                % zaehle("Nadellager"))
             naben = [sh for n, sh in teile
                      if "Scheibennabe" in n]
             welle = [sh for n, sh in teile if n.endswith("Antriebswelle")]
