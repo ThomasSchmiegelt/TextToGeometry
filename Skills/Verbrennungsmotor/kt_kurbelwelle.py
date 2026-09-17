@@ -56,7 +56,8 @@ def kennwerte(bauform="R4", hub=86.0, zylinderabstand=91.0,
 
 def baue(bauform="R4", hub=86.0, zylinderabstand=91.0, hauptlager_d=54.0,
          hubzapfen_d=48.0, hubzapfen_b=26.0, hauptlager_b=26.0, wange_t=18.0,
-         wange_b=0.0, gegengewicht=True, flansch_d=110.0, flansch_t=12.0,
+         wange_b=0.0, gegengewicht=True, gegengewicht_r=0.0,
+         flansch_d=110.0, flansch_t=12.0,
          steuertrieb_d=30.0, steuertrieb_l=30.0, v8_kreuzebene=True,
          bankwinkel=0.0, zentrier_d=0.0, name="Kurbelwelle"):
     """Eine Kurbelwelle als :class:`Bauteil`.
@@ -68,6 +69,13 @@ def baue(bauform="R4", hub=86.0, zylinderabstand=91.0, hauptlager_d=54.0,
     hubzapfen_d      Durchmesser der Hubzapfen [mm]
     wange_t          Dicke einer Kurbelwange [mm]
     gegengewicht     Gegengewichte an den Wangen anformen
+    gegengewicht_r   groesster Radius des Gegengewichts [mm]; 0 = halbe
+                     Wangenbreite. Das Gegengewicht steht dem Hubzapfen
+                     GEGENUEBER, zeigt also im UT geradewegs auf die
+                     Kolbenschuerze. Bei kurzem Hub reicht es weiter, als
+                     der Kolben Platz laesst — gemessen an 67 x 42,5 mm:
+                     Gegengewicht r 42,0 gegen 34,4 mm freie Hoehe, 4,3 %
+                     Durchdringung. Wer den Wert setzt, deckelt es.
     zentrier_d       Durchmesser der Zentrierbohrung im Schwungradflansch
                      [mm]; 0 = 0,30 · Flanschdurchmesser. Dort sitzt das
                      Pilotlager der Getriebeeingangswelle.
@@ -97,6 +105,11 @@ def baue(bauform="R4", hub=86.0, zylinderabstand=91.0, hauptlager_d=54.0,
     # Die Wange muss den Hubzapfen tragen, mehr nicht. Mit 6 mm Ueberstand
     # streifte das Gegengewicht beim V10 die Kolbenschuerze (2,2 %).
     wb = float(wange_b) or (r + r_hub + 2.0) * 2.0
+    # Nur die Gegengewichtsscheibe wird gedeckelt, nicht wb selbst: wb
+    # bemisst auch den Schnittkasten, und ein kleineres wb wuerde die
+    # Kappe ueber dem Hubzapfen mit abschneiden.
+    gg_r = float(gegengewicht_r) or wb / 2.0
+    gg_r = max(min(gg_r, wb / 2.0), float(hauptlager_d) / 2.0 + 3.0)
 
     if r_haupt <= 0 or r_hub <= 0:
         raise ValueError("Zapfendurchmesser muessen positiv sein.")
@@ -115,7 +128,7 @@ def baue(bauform="R4", hub=86.0, zylinderabstand=91.0, hauptlager_d=54.0,
         """Eine Kurbelwange: Scheibe vom Hauptlager zum Hubzapfen."""
         _dy, y, z = zapfenort(r, phi)
         # Scheibe um die Wellenachse, dann auf die Zapfenseite verlaengert.
-        grund = Part.makeCylinder(wb / 2.0, float(wange_t), Vector(x0, 0, 0),
+        grund = Part.makeCylinder(gg_r, float(wange_t), Vector(x0, 0, 0),
                                   Vector(1, 0, 0))
         if not gegengewicht:
             # Ohne Gegengewicht nur der Steg zum Zapfen.
@@ -241,6 +254,7 @@ def baue(bauform="R4", hub=86.0, zylinderabstand=91.0, hauptlager_d=54.0,
     bt.kennwerte["laenge"] = round(x + float(flansch_t)
                                    - (anfang - float(steuertrieb_l)), 1)
     bt.kennwerte["zylinderabstand"] = abstand
+    bt.kennwerte["gegengewicht_r"] = round(gg_r, 2)
     return bt
 
 

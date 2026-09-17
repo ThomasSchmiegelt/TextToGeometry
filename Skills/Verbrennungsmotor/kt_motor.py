@@ -29,6 +29,7 @@ heraussteht, oder einen, der nie hinkommt.
 import math
 
 import FreeCAD
+import Part
 from FreeCAD import Vector
 
 import kt_auslegung
@@ -42,6 +43,16 @@ import kt_ventiltrieb
 
 class MotorFehler(Exception):
     pass
+
+
+#: Primäruntersetzung eines Motorradmotors — Kurbelwelle auf
+#: Getriebeeingangswelle. Üblich 1,6 bis 2,2.
+PRIMAER_I = 1.9
+
+#: Lage der Getriebeeingangswelle, gemessen von +Z (senkrecht über der
+#: Kurbelwelle) in Richtung +Y. 135° heißt: nach hinten und nach unten —
+#: dorthin, wo beim Motorrad der Platz ist.
+PRIMAER_WINKEL = 135.0
 
 
 def blockhoehe(hub, stichmass, kompressionshoehe):
@@ -121,8 +132,9 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
          bankwinkel=0.0, v8_kreuzebene=True, mit_ventiltrieb=True,
          mit_getriebe=False, getriebe_gaenge=5, getriebe_welle_d=0.0,
          getriebe_modul=0.0, getriebe_zaehne_summe=0,
-         getriebe_drehung=None, mit_kupplung=False, kupplung_scheiben=0,
-         doc=None):
+         getriebe_drehung=None, getriebe_lage="laengs", primaer_i=PRIMAER_I,
+         primaer_winkel=PRIMAER_WINKEL, kettenrad_z=17,
+         mit_kupplung=False, kupplung_scheiben=0, doc=None):
     """Ein vollständiger Motor als Liste von (Bezeichnung, Shape).
 
     bauform             R2 … V12
@@ -151,6 +163,17 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
                         90 Grad, und der Hubzapfenversatz folgt daraus
                         (|720/z − bank|): 90-Grad-V6 → 30 Grad Versatz.
     mit_ventiltrieb     False baut nur Kurbelwelle, Pleuel und Kolben
+    getriebe_lage       "laengs" — Getriebe hinter dem Motor auf der
+                        Kurbelwellenachse (Auto, längs eingebaut).
+                        "parallel" — Getriebe NEBEN dem Motor, Achsen
+                        parallel zur Kurbelwelle, angetrieben über ein
+                        Zahnradpaar (Motorrad). Der Motor steht dort quer
+                        im Rahmen, seine Kurbelwellenachse ist die Breite
+                        des Fahrzeugs; das Getriebe darf axial nicht über
+                        ihn hinausragen.
+    primaer_i           Primäruntersetzung Kurbelwelle → Getriebe
+    primaer_winkel      Lage der Eingangswelle, von +Z nach +Y [Grad]
+    kettenrad_z         Zähne des Abtriebskettenrades
     mit_kupplung        True setzt die Einscheiben- oder
                         Zweischeibenkupplung aus Tools/kupplung.py an den
                         Schwungradflansch; das Getriebe rückt dann um ihre
@@ -206,10 +229,21 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
     # Die Zentrierbohrung im Schwungradflansch nimmt die Nase der
     # Getriebeeingangswelle auf; ihr Durchmesser folgt also dem Getriebe.
     zentrier_d = 0.0
+    flansch_d = flansch_t = 0.0
     if mit_kupplung or mit_getriebe:
-        zentrier_d = round(getriebe_auslegung(
+        g_vor = getriebe_auslegung(
             k["hubraum_cm3"], getriebe_welle_d, getriebe_modul,
-            getriebe_zaehne_summe, getriebe_gaenge)["welle_d"] + 1.0, 1)
+            getriebe_zaehne_summe, getriebe_gaenge)
+        zentrier_d = round(g_vor["welle_d"] + 1.0, 1)
+        if str(getriebe_lage) == "parallel":
+            # Ein MOTORRAD hat keinen Schwungradflansch. Am hinteren
+            # Kurbelwellenende sitzt das Primaerritzel, und der 110-mm-
+            # Flansch stand genau dort — gemessen 88,7 % Durchdringung
+            # zwischen Ritzel und Kurbelwelle. An seine Stelle kommt ein
+            # Zapfen vom Durchmesser des Hauptlagers, lang genug fuer das
+            # Ritzel und seine Anlage.
+            flansch_d = a["hauptlager_d"]
+            flansch_t = round(g_vor["breite"] + 6.0, 1)
     teile, proben, kw, zylinder_x = kt_kurbeltrieb.baue(
         bauform=bauform, bohrung=bohrung, hub=hub, stichmass=l,
         kompressionshoehe=a["kompressionshoehe"], zylinderabstand=za,
@@ -222,6 +256,7 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
         kolben_feuersteg=a["kolben_feuersteg"],
         kolben_ringsteg=a["kolben_ringsteg"],
         kolben_desachsierung=a["kolben_desachsierung"],
+        flansch_d=flansch_d, flansch_t=flansch_t,
         zentrier_d=zentrier_d, bankwinkel=bankwinkel,
         v8_kreuzebene=v8_kreuzebene, ventiltaschen=taschen)
 
@@ -254,7 +289,16 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=0.0,
             # den Kupplungsdeckel bzw. das Schwungrad.
             glocke_d = max(k["kupplung"]["schwungrad_d"] + 14.0,
                            k["kupplung"]["belag_d"] + 40.0) + 20.0
-    if mit_getriebe:
+    if mit_getriebe and str(getriebe_lage) == "parallel":
+        # Motorrad: das Getriebe liegt NEBEN dem Motor und wird ueber ein
+        # Zahnradpaar angetrieben, das zugleich die Vorgelegestufe ist.
+        m_von = min(sh.BoundBox.XMin for _n, sh in teile)
+        m_bis = max(sh.BoundBox.XMax for _n, sh in teile)
+        teile.extend(_getriebe_parallel(
+            kw, k, doc, getriebe_gaenge, getriebe_welle_d, getriebe_modul,
+            getriebe_zaehne_summe, primaer_i, primaer_winkel, kettenrad_z,
+            motor_von=m_von, motor_bis=m_bis))
+    elif mit_getriebe:
         # MIT Kupplung waechst die Glocke um deren Baulaenge nach vorn, und
         # das Getriebe selbst rueckt nicht weg: die Antriebswelle laeuft
         # durch die Glocke bis ins Schwungrad, und die Kupplungsscheiben
@@ -406,6 +450,195 @@ def _kupplung_anflanschen(abtrieb, k, doc, welle_d, scheiben=0):
     a["teile"] = len(aus)
     k["kupplung"] = a
     return aus, laenge
+
+
+def _getriebe_parallel(kw, k, doc, gaenge=6, welle_d=0.0, modul=0.0,
+                       zaehne_summe=0, primaer_i=PRIMAER_I,
+                       primaer_winkel=PRIMAER_WINKEL, kettenrad_z=17,
+                       motor_von=None, motor_bis=None):
+    """Das Getriebe eines **Motorrads**: parallel zur Kurbelwelle.
+
+    Beim längs eingebauten Automotor liegt das Getriebe hinter dem Motor auf
+    derselben Achse. Beim Motorrad geht das nicht: der Motor steht quer im
+    Rahmen, seine Kurbelwellenachse ist die **Breite** des Fahrzeugs, und
+    was dort hinausragt, ragt seitlich heraus. Das Getriebe liegt deshalb
+    **parallel daneben** — hinter und unter der Kurbelwelle, im Schatten des
+    Motors — und darf axial nicht über ihn hinausstehen.
+
+    Der Antrieb ist ein **Zahnradpaar**, der Primärtrieb:
+
+        Kurbelwelle --(Primärritzel z1 / Primärrad z2)--> Eingangswelle
+
+    Und dieses Paar ist zugleich die **Vorgelegestufe** — anders als beim
+    Auto braucht es keine eigene Antriebskonstante im Getriebe. Deshalb ist
+    das Getriebe hier ein **Zweiwellengetriebe**: je Gang ein Radpaar
+    zwischen Eingangs- und Abtriebswelle, und die Gesamtübersetzung ist
+
+        i = i_primär · (z_Losrad / z_Festrad)
+
+    Am Ausgang sitzt kein Flansch, sondern ein **Kettenrad**: von dort geht
+    die Kette zum Hinterrad.
+    """
+    import getriebe_fcgear as GF
+    import kt_steuertrieb
+
+    g = getriebe_auslegung(k.get("hubraum_cm3", BEZUG_HUBRAUM), welle_d,
+                           modul, zaehne_summe, gaenge)
+    g["bauart"] = "zweiwellen"
+    g["lage"] = "parallel"
+
+    # --- Primaertrieb -----------------------------------------------------
+    # Der Achsabstand ist NICHT frei waehlbar: die Getriebewellen laufen
+    # neben der Kurbelwelle, und dazwischen muessen die KURBELWANGEN und
+    # das groesste Getrieberad aneinander vorbei. Mit einem fest gewaehlten
+    # Zaehnepaar kam ein Abstand von 40 mm heraus, bei 42 mm Wangenradius —
+    # das Getriebelager stak zu 100 % in der Kurbelwelle.
+    a = k["auslegung"]
+    r_wange = a["kurbelradius"] + a["hubzapfen_d"] / 2.0 + 2.0
+    m_p = g["modul"]
+    z_max_getriebe = g["zaehne_summe"] - g["z_min"]
+    r_getrieberad = m_p * (z_max_getriebe + 2) / 2.0
+    a_min = r_wange + r_getrieberad + 6.0
+    # Zaehnezahlen aus dem noetigen Abstand, bei festgehaltener Uebersetzung.
+    z_summe = max(int(math.ceil(2.0 * a_min / m_p)), 40)
+    z1 = max(17, int(round(z_summe / (1.0 + float(primaer_i)))))
+    z2 = z_summe - z1
+    a_p = m_p * (z1 + z2) / 2.0
+    # Das Kurbelwellenende: dort sitzt das Ritzel.
+    nase = kw.punkt("abtrieb")
+    w = math.radians(float(primaer_winkel))
+    richtung = Vector(0.0, math.sin(w), math.cos(w))
+    mitte = Vector(richtung).multiply(a_p)
+    g["primaer"] = {"zaehne": [z1, z2], "i": round(z2 / float(z1), 4),
+                    "modul": m_p, "achsabstand": round(a_p, 2),
+                    "mindestabstand": round(a_min, 2),
+                    "wangenradius": round(r_wange, 2),
+                    "winkel": float(primaer_winkel)}
+
+    teile = []
+
+    # --- Das Getriebe selbst ---------------------------------------------
+    roh = GF.baue(bauart="zweiwellen", gaenge=int(gaenge),
+                  welle_d=g["welle_d"], modul=g["modul"], breite=g["breite"],
+                  luft=g["luft"], zaehne_summe=g["zaehne_summe"],
+                  wand=g["wand"], schraube_d=g["schraube_d"],
+                  z_min=g["z_min"], lager_reihe=g["lager_reihe"], doc=doc)
+
+    def spanne(passt):
+        kaesten = [sh.BoundBox for n, sh in roh if passt(n)]
+        return min(b.XMin for b in kaesten), max(b.XMax for b in kaesten)
+
+    geh_von, geh_bis = spanne(lambda n: "Gehaeuse" in n)
+    ein_von, ein_bis = spanne(lambda n: n.startswith("Eingangswelle"))
+    ab_von, ab_bis = spanne(lambda n: n.startswith("Ausgangswelle"))
+    ganz_von, ganz_bis = spanne(lambda n: True)
+
+    # Am GANZEN Motor ausrichten und am GANZEN Getriebe messen. Vorher kam
+    # der eine Wert von den Wellen und der andere von der Kurbelwelle, und
+    # das Getriebe stand 6 mm vorn heraus — heraus heisst beim Motorrad:
+    # breiter.
+    mv = float(motor_von) if motor_von is not None \
+        else kw.koerper[0][1].BoundBox.XMin
+    mb = float(motor_bis) if motor_bis is not None else nase.ort.x
+    motor_x = (mv, mb)
+
+    # Das Primaerradpaar sitzt HINTEN, buendig mit dem Kurbelwellenende:
+    # auf der Kurbelwelle das Ritzel (auf dem Zapfen, der beim Motorrad an
+    # die Stelle des Schwungradflansches tritt), auf der Getriebeseite das
+    # Rad auf der verlaengerten Eingangswelle.
+    x_prim = nase.ort.x - g["breite"]
+    # Das Getriebegehaeuse muss davor enden, sonst laeuft das Primaerrad
+    # (Kopfkreis 58 mm) in die Gehaeusestirnwand.
+    versatz_x = min(x_prim - 3.0 - geh_bis, mb - ganz_bis)
+    versatz_x = max(versatz_x, mv - ganz_von)
+
+    # Die Abtriebswelle endet an der Gehaeusewand: ihr Ende laege sonst in
+    # der Ebene des Primaerrades, und das ist mit 114 mm Durchmesser breiter
+    # als der Wellenabstand von 48 mm — gemessen 2,7 % Durchdringung. Am
+    # Motorrad hat diese Welle dort auch nichts zu suchen, das Kettenrad
+    # sitzt auf der anderen Seite.
+    # Der Schnitt trifft die Welle, SOLANGE SIE NOCH IM URSPRUNG STEHT —
+    # also bei geh_bis, nicht bei versatz_x + geh_bis. Mit dem globalen Wert
+    # lag der Kasten 103 mm hinter der Welle und nahm nichts weg; die
+    # Durchdringung blieb auf 2,7 %, was den Fehler verriet.
+    kappen = Part.makeBox(400.0, 400.0, 400.0,
+                          Vector(geh_bis, -200.0, -200.0))
+    for label, shp in roh:
+        kopie = shp.copy()
+        if label.startswith("Ausgangswelle"):
+            kopie = kopie.cut(kappen)
+        kopie.rotate(Vector(0, 0, 0), Vector(1, 0, 0),
+                     float(primaer_winkel) - 90.0)
+        kopie.translate(Vector(versatz_x, mitte.y, mitte.z))
+        teile.append(("Getriebe: " + label, kopie))
+
+    # --- Primaertrieb -----------------------------------------------------
+    # Das Ritzel laeuft auf dem Kurbelwellenzapfen, nicht auf einer
+    # Getriebewelle: seine Bohrung ist die des Hauptlagers.
+    for zahl, ort, bohrung, label in (
+            (z1, Vector(0, 0, 0), a["hauptlager_d"] + 0.2,
+             "Primaerritzel (z=%d)" % z1),
+            (z2, mitte, g["welle_d"], "Primaerrad (z=%d)" % z2)):
+        shp, _d, _da = GF.zahnrad(doc, zahl, m_p, g["breite"], bohrung)
+        rad = shp.copy()
+        rad.rotate(Vector(0, 0, 0), Vector(0, 1, 0), 90)
+        if zahl == z2:
+            # Halbe Zahnteilung Phase, sonst stossen die Zaehne aufeinander.
+            rad.rotate(Vector(0, 0, 0), Vector(1, 0, 0), 180.0 / zahl)
+        rad.translate(Vector(x_prim, ort.y, ort.z))
+        teile.append(("Primaertrieb: " + label, rad))
+
+    def wellenstueck(von, bis, achse, name):
+        """Ein Stueck Welle zwischen Getriebe und dem, was daneben sitzt.
+
+        Primaerrad und Kettenrad muessen axial NEBEN dem Gehaeuse stehen,
+        die Wellen enden aber nur 8 mm hinter seiner Wand. Was fehlt, ist
+        ein Stueck Welle — auf dem Motorrad traegt genau dieser Ueberhang
+        den Kupplungskorb bzw. das Kettenrad.
+        """
+        if bis - von < 0.2:
+            return
+        teile.append((name, Part.makeCylinder(
+            g["welle_d"] / 2.0, bis - von, Vector(von, achse.y, achse.z),
+            Vector(1, 0, 0))))
+
+    wellenstueck(versatz_x + ein_bis, x_prim + g["breite"], mitte,
+                 "Getriebe: Eingangswelle Primaerueberhang")
+
+    # --- Kettenrad am Abtrieb --------------------------------------------
+    # Kein Flansch, sondern ein Kettenrad: von hier geht die Kette zum
+    # Hinterrad. Es sitzt VORN, auf der anderen Seite als der Primaertrieb —
+    # so wie am Motorrad die Kette links und die Kupplung rechts liegt.
+    teilung = 15.875                      # 5/8", uebliche Motorradkette
+    d_kr, _da = kt_steuertrieb.kettenradmasse(int(kettenrad_z), teilung)
+    quer = FreeCAD.Rotation(Vector(1, 0, 0),
+                            float(primaer_winkel) - 90.0).multVec(
+                                Vector(0.0, g["achsabstand"], 0.0))
+    kr_mitte = Vector(mitte.x + quer.x, mitte.y + quer.y, mitte.z + quer.z)
+    kr_b = 10.0
+    x_kr = max(mv + 2.0, versatz_x + geh_von - 3.0 - kr_b)
+    kette = Part.makeCylinder((d_kr - teilung * 2.0 / 3.0) / 2.0, kr_b,
+                              Vector(x_kr, kr_mitte.y, kr_mitte.z),
+                              Vector(1, 0, 0))
+    kette = kette.cut(Part.makeCylinder(
+        g["welle_d"] / 2.0 + 0.1, kr_b + 4.0,
+        Vector(x_kr - 2.0, kr_mitte.y, kr_mitte.z), Vector(1, 0, 0)))
+    teile.append(("Abtrieb: Kettenrad (z=%d, %.3f mm Teilung)"
+                  % (int(kettenrad_z), teilung), kette))
+    wellenstueck(x_kr, versatz_x + ab_von, kr_mitte,
+                 "Getriebe: Ausgangswelle Kettenradueberhang")
+    g["kettenrad"] = {"zaehne": int(kettenrad_z), "teilung": teilung,
+                      "teilkreis": round(d_kr, 2)}
+    g.update({"gaenge": int(gaenge), "teile": len(teile),
+              "x_von": round(min(s.BoundBox.XMin for _n, s in teile), 1),
+              "x_bis": round(max(s.BoundBox.XMax for _n, s in teile), 1)})
+    # Gesamtuebersetzung: Primaer mal Gangpaar.
+    import getriebe_auslegung as GA
+    paare = GA.gangpaare(g["zaehne_summe"], int(gaenge), g["z_min"])
+    g["uebersetzungen"] = [round(g["primaer"]["i"] * i, 3)
+                           for _z1, _z2, i in paare]
+    k["getriebe"] = g
+    return teile
 
 
 def _getriebe_anflanschen(abtrieb, k, doc, gaenge=5, welle_d=0.0, modul=0.0,
@@ -587,7 +820,8 @@ def pruefe(teile=None, proben=None, kenn=None, toleranz=0.02, **kw):
 
     # Das Getriebe muss zum Motor PASSEN, nicht nur an ihm haengen: seine
     # Eingangswelle folgt dem Drehmoment, und das geht mit dem Hubraum.
-    if kenn and kenn.get("getriebe"):
+    if kenn and kenn.get("getriebe") \
+            and kenn["getriebe"].get("lage") != "parallel":
         g = kenn["getriebe"]
         soll = getriebe_auslegung(kenn.get("hubraum_cm3", BEZUG_HUBRAUM))
         sag(abs(g["welle_d"] - soll["welle_d"]) < 0.15 or
@@ -662,6 +896,34 @@ def pruefe(teile=None, proben=None, kenn=None, toleranz=0.02, **kw):
                 "die Vorgelegewelle steht senkrecht zur Kurbelwellenachse "
                 "(y %.1f, z %.1f bei %.1f mm Achsabstand)"
                 % (vorgelege[0], vorgelege[1], g["achsabstand"]))
+
+    # Motorrad: das Getriebe muss AXIAL im Schatten des Motors bleiben.
+    # Die Kurbelwellenachse ist beim Motorrad die Breite des Fahrzeugs —
+    # was dort hinausragt, ragt seitlich heraus.
+    if kenn and kenn.get("getriebe", {}).get("lage") == "parallel":
+        g = kenn["getriebe"]
+        motor = [sh for n, sh in teile
+                 if not n.startswith(("Getriebe", "Primaertrieb", "Abtrieb"))]
+        if motor:
+            mx0 = min(sh.BoundBox.XMin for sh in motor)
+            mx1 = max(sh.BoundBox.XMax for sh in motor)
+            sag(g["x_von"] >= mx0 - 0.5 and g["x_bis"] <= mx1 + 0.5,
+                "das Getriebe bleibt axial im Motor (x %.0f…%.0f in "
+                "%.0f…%.0f)" % (g["x_von"], g["x_bis"], mx0, mx1))
+        sag(abs(g["primaer"]["i"] - g["primaer"]["zaehne"][1]
+                / float(g["primaer"]["zaehne"][0])) < 1e-3,
+            "Primaertrieb z %d/%d, i = %.3f"
+            % (g["primaer"]["zaehne"][0], g["primaer"]["zaehne"][1],
+               g["primaer"]["i"]))
+        sag(g["primaer"]["achsabstand"]
+            >= g["primaer"]["mindestabstand"] - 0.5,
+            "Primaerachsabstand %.1f mm (Kurbelwange %.1f + groesstes "
+            "Getrieberad, mindestens %.1f)"
+            % (g["primaer"]["achsabstand"], g["primaer"]["wangenradius"],
+               g["primaer"]["mindestabstand"]))
+        sag(bool(g.get("kettenrad")),
+            "Abtrieb ist ein Kettenrad (z=%d, Teilkreis %.1f mm)"
+            % (g["kettenrad"]["zaehne"], g["kettenrad"]["teilkreis"]))
 
     # Die Kupplung sitzt ZWISCHEN Motor und Getriebe — sie muss auf der
     # Kurbelwellenachse sitzen, ihre Nabe muss die Getriebeeingangswelle

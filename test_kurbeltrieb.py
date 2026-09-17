@@ -351,6 +351,47 @@ winkel = sorted({round(w, 1) for _s, _x, w, _z
 pruefe(winkel == [-45.0, 45.0],
        "die Baenke des 90-Grad-V6 stehen bei %s Grad" % winkel)
 
+# --- Motorradantrieb: Getriebe parallel ----------------------------------
+# Der Motor wird quer eingebaut, seine Achse ist also die Fahrzeugbreite.
+# Alles, was axial hinaussteht, macht das Motorrad breiter — deshalb ist die
+# axiale Lage hier eine Zusage und keine Geschmacksfrage.
+log("\n--- Motorrad: Getriebe parallel ---")
+mr_teile, mr_kenn, mr_proben = kt_motor.baue(
+    bauform="R4", bohrung=67.0, hub=42.5, ventile_je_zylinder=4,
+    mit_getriebe=True, getriebe_lage="parallel", getriebe_gaenge=6, doc=doc)
+mr_g = mr_kenn["getriebe"]
+mr_schlecht = [t for ok, t in kt_motor.pruefe(mr_teile, mr_proben, mr_kenn)
+               if not ok]
+pruefe(not mr_schlecht, "der Motorrad-R4 mit parallelem Getriebe passt "
+       "zusammen%s" % ("" if not mr_schlecht else ": "
+                       + "; ".join(mr_schlecht)))
+pruefe(mr_g["lage"] == "parallel" and mr_g["bauart"] == "zweiwellen",
+       "das Motorradgetriebe ist ein Zweiwellengetriebe, denn der "
+       "Primaertrieb IST das Vorgelege")
+# Der Primaerachsabstand folgt der Kurbelwange, nicht den Zaehnezahlen.
+pruefe(mr_g["primaer"]["achsabstand"]
+       >= mr_g["primaer"]["mindestabstand"] - 0.5,
+       "der Primaerachsabstand (%.1f) haelt die Kurbelwange (%.1f) frei"
+       % (mr_g["primaer"]["achsabstand"], mr_g["primaer"]["wangenradius"]))
+mr_motor = [s for n, s in mr_teile
+            if not n.startswith(("Getriebe", "Primaertrieb", "Abtrieb"))]
+mr_rest = [s for n, s in mr_teile
+           if n.startswith(("Getriebe", "Primaertrieb", "Abtrieb"))]
+mr_mv = min(s.BoundBox.XMin for s in mr_motor)
+mr_mb = max(s.BoundBox.XMax for s in mr_motor)
+pruefe(min(s.BoundBox.XMin for s in mr_rest) >= mr_mv - 0.5
+       and max(s.BoundBox.XMax for s in mr_rest) <= mr_mb + 0.5,
+       "der ganze Antrieb bleibt im Schatten des Motors (x %.0f…%.0f in "
+       "%.0f…%.0f)" % (min(s.BoundBox.XMin for s in mr_rest),
+                       max(s.BoundBox.XMax for s in mr_rest), mr_mv, mr_mb))
+pruefe(any(n.startswith("Abtrieb: Kettenrad") for n, _s in mr_teile),
+       "der Abtrieb ist ein Kettenrad, kein Flansch")
+# Ohne Schwungradflansch: an seiner Stelle sitzt das Primaerritzel.
+mr_ritzel = [s for n, s in mr_teile if "Primaerritzel" in n][0]
+mr_kw = [s for n, s in mr_teile if n.startswith("Kurbelwelle")]
+pruefe(max(s.BoundBox.XMax for s in mr_kw) >= mr_ritzel.BoundBox.XMax - 0.5,
+       "das Primaerritzel steht auf dem Kurbelwellenende, nicht dahinter")
+
 FreeCAD.closeDocument(doc.Name)
 
 log("\nFEHLER: %d" % len(FEHLER))

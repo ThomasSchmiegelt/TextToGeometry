@@ -16,10 +16,17 @@ Detaillieren als Nächstes ansteht.
 | Tassenstößel mit HVA | [tassenstoessel.md](tassenstoessel.md) | `kt_stoessel.py` |
 | Nockenwelle | [nockenwelle.md](nockenwelle.md) | `kt_nockenwelle.py` |
 | Steuertrieb | [steuertrieb.md](steuertrieb.md) | `kt_steuertrieb.py` |
+| Motorradantrieb | [motorrad_antrieb.md](motorrad_antrieb.md) | `kt_motor.py` |
 
 Die übergreifenden Maße — jene, die **zwei Bauteile teilen** — stehen nicht
 hier, sondern in `kt_auslegung.py`. Diese Dateien beschreiben, was ein
 Bauteil für sich ausmacht.
+
+`motorrad_antrieb.md` fällt aus der Reihe: es beschreibt kein Bauteil,
+sondern eine **Anordnung** — Primärtrieb, parallel liegendes Getriebe und
+Kettenrad. Sie steht hier, weil sie zwei Bauteile verändert hat, die es
+sonst nur im Automotor gibt: die Kurbelwelle verliert ihren
+Schwungradflansch, und zwei feste Maße mussten dem kurzen Hub folgen.
 
 ## Wie die Zahlen hier zu lesen sind
 

@@ -114,7 +114,7 @@ def kennwerte(nocken=4, grundkreis_d=32.0, hub=10.0, **_rest):
 
 
 def baue(winkel=None, grundkreis_d=32.0, hub=10.0, nocken_b=12.0,
-         abstand=45.0, orte=None, lager_d=28.0, lager_b=18.0, welle_d=24.0,
+         abstand=45.0, orte=None, lager_d=0.0, lager_b=18.0, welle_d=0.0,
          antrieb_d=26.0, antrieb_l=28.0, flanke=60.0, name="Nockenwelle"):
     """Eine Nockenwelle als :class:`Bauteil`.
 
@@ -127,10 +127,28 @@ def baue(winkel=None, grundkreis_d=32.0, hub=10.0, nocken_b=12.0,
                   Vierventiler hat zwei Nocken je Zylinder, und die sitzen
                   nicht im Zylinderabstand — mit gleichmäßiger Teilung wurde
                   eine 822 mm lange Welle daraus statt 224 mm.
-    lager_d       Lagerzapfendurchmesser [mm]; ein Lager je zwei Nocken
+    lager_d       Lagerzapfendurchmesser [mm]; ein Lager je zwei Nocken;
+                  0 = 0,875 · Grundkreis.
+                  Er wird auf den **Grundkreis** gedeckelt: im
+                  Tassenstößelmotor läuft der Zapfen über denselben
+                  Stößeln wie die Nocken, und was weiter herunterreicht als
+                  der Grundkreis, drückt in den Stößelboden. Bei 86 mm
+                  Bohrung ist der Grundkreis 32 mm und der Zapfen 28 — das
+                  fällt nicht auf. Bei 67 mm Bohrung ist der Grundkreis
+                  24,9, der feste 28er Zapfen also 1,55 mm zu tief:
+                  gemessen 179 mm³ im Tassenstößel 1.1, 2,7 %.
     """
     winkel = list(winkel or [0.0, 180.0, 180.0, 0.0])
     n = len(winkel)
+    # Zapfen und Schaft folgen dem Grundkreis, statt fest zu stehen
+    # (siehe oben). 0,875 und 0,75 des Grundkreises geben bei 86 mm
+    # Bohrung genau die alten 28 und 24 mm — die Reihenmotoren aendern
+    # sich also nicht, die kleinen werden richtig.
+    # Ein ausdruecklich uebergebener Wert wird NICHT gedeckelt, sondern
+    # weiter unten geprueft: ein unsinniges Mass soll auffallen, nicht
+    # stillschweigend zurechtgebogen werden.
+    lager_d = float(lager_d) or round(float(grundkreis_d) * 0.875, 2)
+    welle_d = float(welle_d) or round(float(grundkreis_d) * 0.75, 2)
     if orte is not None:
         orte = [float(x) for x in orte]
         if len(orte) != n:
@@ -147,6 +165,15 @@ def baue(winkel=None, grundkreis_d=32.0, hub=10.0, nocken_b=12.0,
             "Der Wellenschaft (%.1f) ist dicker als der Grundkreis (%.1f) — "
             "dann gaebe es keinen Nocken."
             % (float(welle_d), float(grundkreis_d)))
+    if float(lager_d) / 2.0 > rg:
+        # Der Lagerzapfen laeuft im Tassenstoesselmotor ueber denselben
+        # Stoesseln wie die Nocken. Ist er dicker als der Grundkreis,
+        # drueckt er in den Stoesselboden — gemessen bei 67 mm Bohrung
+        # mit dem fruher festen 28er Zapfen: 179 mm^3, 2,7 %.
+        raise ValueError(
+            "Der Lagerzapfen (%.1f) ist dicker als der Grundkreis (%.1f) — "
+            "er wuerde in den Tassenstoessel druecken."
+            % (float(lager_d), float(grundkreis_d)))
 
     teile = []
     punkte = []

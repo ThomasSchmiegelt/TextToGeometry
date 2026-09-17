@@ -28,7 +28,8 @@ python3 test_agent.py   # 24 tests: agent protocol, action registry, run budget
 FreeCADCmd test_skills.py   # skills engine — needs the REAL Part module (see gotcha)
 FreeCADCmd test_bauen.py    # 32 checks: placement, replace, collisions, bearing, tools
 FreeCADCmd test_getriebe_makro.py  # 32 checks: mask, DIN 625, housing, FCGear
-FreeCADCmd test_kurbeltrieb.py     # 50 checks: parts, docking, R2…V12 (T2G_TEST_LANG=1 for all ten)
+FreeCADCmd test_kurbeltrieb.py     # 56 checks: parts, docking, R2…V12, motorcycle (T2G_TEST_LANG=1 for all ten)
+FreeCADCmd Beispiele/motorrad_r4.py    # R4 with the parallel gearbox; exits 1 on a finding
 FreeCADCmd Beispiele/getriebe_5gang.py   # reference gearbox; exits 1 if a promise breaks
 FreeCADCmd test_bauen.py    # 24 checks: placement, replace, collisions, bearing, mesh phase
 FreeCADCmd Beispiele/getriebe_5gang.py   # reference gearbox; exits 1 if a promise breaks
@@ -780,6 +781,63 @@ measurement did not change by one percent, which is what gave it away.
 into each half, so the gearbox is exactly three housing parts: bell housing,
 upper half, lower half. A flange that is its own part could not be bolted to
 anything.
+
+### The motorcycle: gearbox beside the engine
+
+`kt_motor.baue(getriebe_lage="parallel")`, shown by
+`Beispiele/motorrad_r4.py`, with the reasoning in
+`Skills/Verbrennungsmotor/Gestaltung/motorrad_antrieb.md`.
+
+A transverse motorcycle engine turns one dimension into a constraint: the
+crank axis is the **width of the vehicle**, so anything sticking out axially
+sticks out sideways. The gearbox therefore lies **parallel** beside the
+crank, behind and below it, and must stay inside the engine's x-range.
+Drive is a **gear pair**, the primary — and that pair *is* the countershaft
+stage, so the gearbox itself is a plain `bauart="zweiwellen"` box with one
+pair per gear; the output is a **chain sprocket**, not a flange. Overall
+ratio is `i_primary · (z_loose/z_fixed)`.
+
+Four things the measurement settled:
+
+- **The primary centre distance does not follow from the tooth counts.** It
+  follows from what has to pass between the two axes: `a_min = crank web
+  radius + largest gear radius + clearance`, and only then are the teeth
+  chosen at the given ratio. A freely picked 22/42 gave 40 mm at a 42 mm web
+  radius — the gearbox bearing sat **100 %** inside the crankshaft. The
+  constraint gives 48/91 and 86.9 mm.
+- **A motorcycle crank has no flywheel flange.** The primary pinion sits
+  where the 110 mm flange stood (88.7 %); `kt_kurbeltrieb.baue` now takes
+  `flansch_d`/`flansch_t` (0 = keep the default) and the bike gets a stub of
+  main-journal diameter.
+- **Primary gears at the rear, sprocket at the front**, both axially *beside*
+  the housing (a 116 mm tip circle does not fit against the end wall), each
+  on a piece of shaft that reaches out to it — that overhang is what carries
+  the clutch basket and the sprocket on the real machine. The **output
+  shaft** is cut back to the housing wall, or its end lies in the plane of
+  the 114 mm primary gear, 48 mm away (2.7 %).
+- A cut applied to a `roh` part happens **before** the part is placed, so the
+  cutting box belongs at `geh_bis`, not `versatz_x + geh_bis`. With the
+  global value the box sat 103 mm past the shaft and removed nothing — the
+  penetration stayed at exactly 2.7 %, which is what gave it away.
+
+**A short stroke uncovers fixed dimensions.** 67 × 42.5 instead of 86 × 86,
+and two values that fitted at 86 mm by coincidence stopped fitting:
+
+- The **counterweight** faces the crankpin, so at BDC it points straight at
+  the piston skirt. What is free there is `(rod length − crank radius) −
+  skirt height`: 83.3 mm at 86 × 86 against a 69.0 mm counterweight,
+  but 34.4 against 42.0 at 67 × 42.5 — 4.3 % into piston 2.
+  `kt_kurbeltrieb` caps it (`gegengewicht_r`) where rod and piston are known.
+- The **camshaft journal** stood at a fixed 28 mm. In a bucket-tappet head it
+  runs over the same tappets as the lobes, so anything reaching deeper than
+  the base circle digs into the bucket: base circle 32 mm at 86 mm bore
+  (fine), 24.9 mm at 67 (2.7 %). Journal and shaft core now follow the base
+  circle (0.875 / 0.75), which reproduces exactly 28 and 24 mm at 86 mm bore,
+  and an explicitly oversized journal is refused rather than clamped.
+
+Both had been there all along, hidden behind a bigger one: **`pruefe()`
+reports only the largest penetration.** After fixing one finding, measure
+again.
 
 ### A film of the assembly
 

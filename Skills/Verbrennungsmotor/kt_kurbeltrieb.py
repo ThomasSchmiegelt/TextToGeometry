@@ -49,6 +49,21 @@ def zapfenbreite(bauform, pleuel_breite, bankwinkel=0.0):
     return (2.0 * b + 4.0) if B.ist_v(bauform, bankwinkel) else (b + 4.0)
 
 
+def _flansch(flansch_d, flansch_t):
+    """Nur wirkliche Werte durchreichen — 0 heisst "nicht angegeben".
+
+    Ein blankes ``flansch_d=0.0`` an die Kurbelwelle weiterzugeben hiesse,
+    den Flansch auf Durchmesser null zu setzen; genau diese Verwechslung
+    hat in kt_auslegung einmal die ganze Tabelle mit Nullen ueberschrieben.
+    """
+    w = {}
+    if float(flansch_d) > 0.0:
+        w["flansch_d"] = float(flansch_d)
+    if float(flansch_t) > 0.0:
+        w["flansch_t"] = float(flansch_t)
+    return w
+
+
 def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=150.5,
          kompressionshoehe=32.0, zylinderabstand=101.5, bolzen_d=22.0,
          hubzapfen_d=48.0, hauptlager_d=54.0, pleuel_breite=22.0,
@@ -56,7 +71,7 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=150.5,
          bankwinkel=0.0,
          wange_t=0.0, hauptlager_b=0.0, kolben_schafthoehe=0.0,
          kolben_boden_t=0.0, kolben_feuersteg=0.0, kolben_ringsteg=0.0,
-         kolben_desachsierung=0.0,
+         kolben_desachsierung=0.0, flansch_d=0.0, flansch_t=0.0,
          v8_kreuzebene=True, ventiltaschen=None):
     """Kurbelwelle, Pleuel und Kolben.
 
@@ -67,6 +82,12 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=150.5,
     kurbelwelle das :class:`kt_schnittstelle.Bauteil` — der Ventiltrieb
                 braucht seinen Steuertriebzapfen, der Motor den Flansch
     zylinder_x  {Zylindernummer: x-Lage} — wo der Kolben wirklich sitzt
+
+    ``flansch_d`` / ``flansch_t`` überschreiben den Schwungradflansch der
+    Kurbelwelle, wenn sie gesetzt sind (0 = die Vorgabe der Kurbelwelle
+    behalten). Ein **Motorrad** hat keinen Schwungradflansch: dort sitzt am
+    Kurbelwellenende das Primärritzel auf einem Zapfen, und ein 110-mm-
+    Flansch stünde genau dort, wo das Ritzel hingehört.
 
     ``pleuel_auge_b`` ist die Breite des kleinen Auges, und der Kolben muss
     GENAU dafür seinen Schlitz frei lassen. Im Kolben stand dieses Maß
@@ -79,6 +100,17 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=150.5,
     teile = []
     proben = []
 
+    # Das Gegengewicht zeigt dem Hubzapfen entgegen — im UT also
+    # geradewegs auf die Kolbenschuerze. Was dort frei bleibt, ist der
+    # Abstand des Schuerzenendes von der Wellenachse im UT:
+    #     (Stichmass - Kurbelradius) - Schafthoehe
+    # Bei langem Hub ist das reichlich (86 x 86: 83,3 mm gegen 69,0), bei
+    # kurzem nicht: 67 x 42,5 ergibt 34,4 mm gegen ein Gegengewicht von
+    # 42,0 — gemessen 4,3 % Durchdringung mit Kolben 2. Deshalb wird das
+    # Gegengewicht hier gedeckelt, wo Pleuellaenge und Kolben bekannt sind.
+    schaft = float(kolben_schafthoehe) or round(float(bohrung) * 0.281, 2)
+    gg_frei = round(l - float(hub) / 2.0 - schaft - 1.5, 2)
+
     kw = kt_kurbelwelle.baue(bauform=bauform, hub=hub,
                              zylinderabstand=zylinderabstand,
                              hauptlager_d=hauptlager_d,
@@ -88,9 +120,11 @@ def baue(bauform="R4", bohrung=86.0, hub=86.0, stichmass=150.5,
                              bankwinkel=bankwinkel,
                              steuertrieb_d=float(steuertrieb_d),
                              zentrier_d=float(zentrier_d),
+                             gegengewicht_r=gg_frei,
                              wange_t=float(wange_t) or 18.0,
                              hauptlager_b=float(hauptlager_b) or 26.0,
-                             v8_kreuzebene=v8_kreuzebene)
+                             v8_kreuzebene=v8_kreuzebene,
+                             **_flansch(flansch_d, flansch_t))
     teile.extend(kw.koerper)
 
     # Einmal gebaut und dann kopiert: eine Ventilfeder zu bauen dauert
